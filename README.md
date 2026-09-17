@@ -26,6 +26,8 @@ docker compose up --build -d
 
 Open <http://localhost:3000>. Stop a local `pnpm dev` process first if it already uses port 3000. Use `docker compose logs -f app` for logs and `docker compose down` to stop it.
 
+Docker binds to localhost only. Set `APP_PORT` in `.env` to change the host port. On nixpi, use `APP_PORT=13004`; the nix-server configuration serves it at <https://speech.infiniter.tech> through nginx with an automatically renewed TLS certificate.
+
 The Dockerfile builds with Node 24.20.0 and pnpm 10.34.5, then runs only the Next.js standalone output and static assets as the unprivileged `node` user. Compose reads `.env` at runtime; `.dockerignore` excludes all `.env` files from the build context. No API key is required to build the image. For a remote hostname, serve it through HTTPS so browsers allow microphone access. A reverse proxy should preserve the original `Host` header and overwrite `X-Forwarded-Proto` with the public request's scheme for origin validation.
 
 ## Environment variables
