@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.env*
+*.tsbuildinfo
+test-results
+tests
+AGENTS.md
+CLAUDE.md
+README.md
+flake.nix
+flake.lock
+scripts
