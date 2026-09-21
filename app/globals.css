@@ -643,6 +643,13 @@ button:disabled:hover {
   position: relative;
   max-width: 984px;
   margin: 44px auto 0;
+  scroll-margin-top: 24px;
+}
+.discovery-reveal {
+  animation: arrive 0.55s ease-out both;
+}
+.discovery-reveal .instrument-card {
+  animation: none;
 }
 .discovery-attention {
   position: absolute;

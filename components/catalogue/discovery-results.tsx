@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import { ArrowDown } from "lucide-react";
 import type { ChoiceState } from "@/lib/tools";
 import { InstrumentCard } from "./instrument-card";
@@ -11,56 +14,78 @@ export function DiscoveryResults({
   selection: { choice, suggestions },
   onExploreAgain,
 }: DiscoveryResultsProps) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const resultKey =
+    choice || suggestions.length > 0
+      ? JSON.stringify({ choice, suggestions })
+      : null;
+
+  useEffect(() => {
+    if (!resultKey) return;
+    sectionRef.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+      block: "start",
+    });
+  }, [resultKey]);
+
   return (
     <section
+      ref={sectionRef}
       className={`discovery-section ${choice ? "has-choice" : ""}`}
       aria-label={
         choice ? "Your confirmed instrument" : "Instrument suggestions"
       }
       aria-live="polite"
     >
-      {(choice || suggestions.length > 0) && (
+      {resultKey && (
         <span
-          key={JSON.stringify({ choice, suggestions })}
+          key={`pulse-${resultKey}`}
           className="discovery-attention"
           aria-hidden="true"
         />
       )}
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">
-            {choice
-              ? "MADE FOR YOUR MUSICAL JOURNEY"
-              : "POSSIBILITIES, PICKED FOR YOU"}
-          </span>
-          <h2>
-            {choice
-              ? "You found your first note."
-              : suggestions.length
-                ? "These could be your kind of thing."
-                : "Your next favourite thing awaits."}
-          </h2>
+      <div
+        key={`reveal-${resultKey ?? "empty"}`}
+        className={resultKey ? "discovery-reveal" : undefined}
+      >
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">
+              {choice
+                ? "MADE FOR YOUR MUSICAL JOURNEY"
+                : "POSSIBILITIES, PICKED FOR YOU"}
+            </span>
+            <h2>
+              {choice
+                ? "You found your first note."
+                : suggestions.length
+                  ? "These could be your kind of thing."
+                  : "Your next favourite thing awaits."}
+            </h2>
+          </div>
+          {!choice && (
+            <span className="section-note">
+              {suggestions.length
+                ? `${suggestions.length} ${suggestions.length === 1 ? "instrument" : "instruments"} to explore`
+                : "Listen. Discover. Make it yours."}
+              <ArrowDown size={15} />
+            </span>
+          )}
         </div>
-        {!choice && (
-          <span className="section-note">
-            {suggestions.length
-              ? `${suggestions.length} ${suggestions.length === 1 ? "instrument" : "instruments"} to explore`
-              : "Listen. Discover. Make it yours."}
-            <ArrowDown size={15} />
-          </span>
+        {choice ? (
+          <ConfirmedChoice choice={choice} onExploreAgain={onExploreAgain} />
+        ) : suggestions.length ? (
+          <div className="suggestions-grid">
+            {suggestions.map((item) => (
+              <InstrumentCard key={item.instrumentId} suggestion={item} />
+            ))}
+          </div>
+        ) : (
+          <EmptySuggestions />
         )}
       </div>
-      {choice ? (
-        <ConfirmedChoice choice={choice} onExploreAgain={onExploreAgain} />
-      ) : suggestions.length ? (
-        <div className="suggestions-grid">
-          {suggestions.map((item) => (
-            <InstrumentCard key={item.instrumentId} suggestion={item} />
-          ))}
-        </div>
-      ) : (
-        <EmptySuggestions />
-      )}
     </section>
   );
 }
