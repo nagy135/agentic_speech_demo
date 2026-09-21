@@ -1,6 +1,7 @@
 import { emptyChoiceState, executeTool, normalizeTranscript } from "../tools";
 import { LiveTransport } from "./transport";
 import { LiveTranscripts } from "./transcripts";
+import { greetingCue, greetingInstructions } from "./greeting";
 import {
   backendSettings,
   defaultVoiceSettings,
@@ -49,6 +50,7 @@ export class LiveClient {
   private readonly working = new Set<string>();
   private speaking = false;
   private commandSequence = 0;
+  private pendingGreeting: string | null = null;
   private pendingSettings: { settings: VoiceSettings; eventId: string } | null =
     null;
   private settingsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -93,6 +95,7 @@ export class LiveClient {
     this.delegations.clear();
     this.working.clear();
     this.speaking = false;
+    this.pendingGreeting = null;
     this.update({
       ...initialSnapshot(),
       status: "connecting",
@@ -150,6 +153,7 @@ export class LiveClient {
   };
 
   private finishSession(error?: string): void {
+    this.pendingGreeting = null;
     this.clearSettingsUpdate();
     if (this.closeTimer) clearTimeout(this.closeTimer);
     this.closeTimer = null;
@@ -250,13 +254,30 @@ export class LiveClient {
           status: "connected",
           sessionId: event.session?.id || null,
         });
+        this.pendingGreeting = this.eventId("greeting");
         this.transport?.send({
           type: "session.instructions.append",
-          event_id: this.eventId("greeting"),
+          event_id: this.pendingGreeting,
           delegation_id: null,
-          content:
-            "Greet the user now in English. Briefly introduce yourself as Melody and ask what kind of music they would love to play. Then pause and listen. Do not suggest instruments yet.",
+          content: greetingInstructions,
         });
+        break;
+      case "session.instructions.appended":
+        if (
+          this.pendingGreeting &&
+          event.client_event_id === this.pendingGreeting
+        ) {
+          this.pendingGreeting = null;
+          // Instructions steer behavior; commentary cues speech on silent startup.
+          // Do not restart the opening if either speaker has already begun.
+          if (!this.snapshot.transcript.length && !this.speaking)
+            this.transport?.send({
+              type: "session.commentary.append",
+              event_id: this.eventId("greeting-cue"),
+              delegation_id: null,
+              content: greetingCue,
+            });
+        }
         break;
       case "session.updated":
         if (
@@ -287,6 +308,8 @@ export class LiveClient {
         this.handleBackendEvent(event);
         break;
       case "error":
+        if (event.error?.client_event_id === this.pendingGreeting)
+          this.pendingGreeting = null;
         if (
           this.pendingSettings &&
           event.error?.client_event_id === this.pendingSettings.eventId

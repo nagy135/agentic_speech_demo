@@ -193,7 +193,7 @@ test("tools wait for a user transcript before recording a suggestion turn", asyn
   assert.match(JSON.parse(output).error, /transcript is not available/);
 });
 
-test("waits for session.started and greets through Live instructions, not response.create", async (t) => {
+test("silent startup cues greeting only after matching instruction acknowledgement, once", async (t) => {
   const { client, audio, sent, requests, emit } = browserFixture(
     t,
     false,
@@ -212,7 +212,51 @@ test("waits for session.started and greets through Live instructions, not respon
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "session.instructions.append");
   assert.equal(sent[0].delegation_id, null);
+  emit({ type: "session.instructions.appended", client_event_id: "unrelated" });
+  assert.equal(sent.length, 1);
+  const greetingId = sent[0].event_id;
+  emit({ type: "session.instructions.appended", client_event_id: greetingId });
+  emit({ type: "session.instructions.appended", client_event_id: greetingId });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].type, "session.commentary.append");
+  assert.equal(sent[1].delegation_id, null);
+  assert.equal(
+    sent.some((e) => e.type === "response.create"),
+    false,
+  );
 });
+
+for (const scenario of ["user", "assistant", "rejected", "closing"] as const) {
+  test(`greeting cue is suppressed when ${scenario} precedes acknowledgement`, async (t) => {
+    const { client, audio, sent, emit } = browserFixture(t);
+    await client.start(audio);
+    const greetingId = sent[0].event_id;
+    if (scenario === "user" || scenario === "assistant")
+      emit({
+        type:
+          scenario === "user"
+            ? "session.input_transcript.delta"
+            : "session.output_transcript.delta",
+        delta: "Hello",
+        start_ms: 100,
+        end_ms: 500,
+      });
+    else if (scenario === "rejected")
+      emit({
+        type: "error",
+        error: { client_event_id: greetingId, message: "Rejected" },
+      });
+    else void client.stop();
+    emit({
+      type: "session.instructions.appended",
+      client_event_id: greetingId,
+    });
+    assert.equal(
+      sent.some((e) => e.type === "session.commentary.append"),
+      false,
+    );
+  });
+}
 
 test("nested output-item tools work with empty completion output, duplicate events and multilingual confirmation", async (t) => {
   const { client, audio, sent, user, begin, tool, complete } =
