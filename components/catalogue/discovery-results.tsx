@@ -19,6 +19,13 @@ export function DiscoveryResults({
       }
       aria-live="polite"
     >
+      {(choice || suggestions.length > 0) && (
+        <span
+          key={JSON.stringify({ choice, suggestions })}
+          className="discovery-attention"
+          aria-hidden="true"
+        />
+      )}
       <div className="section-heading">
         <div>
           <span className="eyebrow">
