@@ -1,6 +1,6 @@
 import { instrumentsById } from "../catalogue";
 
-export const realtimeTools = [
+export const liveTools = [
   {
     type: "function",
     name: "suggest_instrument",

@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
-import { useRealtime } from "@/hooks/use-realtime";
+import { useLive } from "@/hooks/use-live";
 import { SiteHeader } from "./layout/site-header";
 import { SiteFooter } from "./layout/site-footer";
 import { Hero } from "./landing/hero";
@@ -13,11 +13,10 @@ import { VoiceSettings } from "./conversation/voice-settings";
 
 export function InstrumentFinder() {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const voice = useRealtime(audioRef);
+  const voice = useLive(audioRef);
   const [collectionOpen, setCollectionOpen] = useState(false);
   function exploreAgain() {
-    voice.stop();
-    void voice.start();
+    void voice.restart();
   }
   return (
     <div className="app-shell">

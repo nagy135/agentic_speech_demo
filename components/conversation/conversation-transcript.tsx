@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { AudioLines, ChevronDown } from "lucide-react";
-import type { Transcript } from "@/lib/realtime/types";
+import type { Transcript } from "@/lib/live/types";
 export function ConversationTranscript({ entries }: { entries: Transcript[] }) {
   const [showTranscript, setShowTranscript] = useState(false);
   const transcriptBottom = useRef<HTMLDivElement>(null);

@@ -6,20 +6,23 @@ import {
 } from "./settings";
 
 interface TransportCallbacks {
-  onOpen: () => void;
   onEvent: (event: ServerEvent) => void;
   onError: (message: string) => void;
   onAudioBlocked: () => void;
+  onSpeaking: (speaking: boolean) => void;
 }
 
 /** Owns one WebRTC connection and every browser resource it acquires. */
-export class RealtimeTransport {
+export class LiveTransport {
   private peer: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private stream: MediaStream | null = null;
   private readonly abort = new AbortController();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private audioTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastAudio: { energy: number; duration: number } | null = null;
+  private speaking = false;
 
   constructor(
     private readonly audio: HTMLAudioElement,
@@ -81,17 +84,17 @@ export class RealtimeTransport {
       channel.onmessage = (message) => {
         if (this.closed) return;
         try {
-          this.callbacks.onEvent(JSON.parse(message.data) as ServerEvent);
+          const event = JSON.parse(message.data) as ServerEvent;
+          if (event.type === "session.started") {
+            this.clearTimer();
+            void this.observeAudio();
+          }
+          this.callbacks.onEvent(event);
         } catch {
           this.fail(
             "An unexpected voice event was received. Please reconnect.",
           );
         }
-      };
-      channel.onopen = () => {
-        if (this.closed) return;
-        this.clearTimer();
-        this.callbacks.onOpen();
       };
       channel.onclose = () =>
         this.fail("The voice session ended. You can start a new conversation.");
@@ -102,14 +105,20 @@ export class RealtimeTransport {
       const offer = await peer.createOffer();
       if (this.closed) return;
       await peer.setLocalDescription(offer);
+      await this.waitForIce(peer);
       if (this.closed) return;
+      const sdpOffer = peer.localDescription?.sdp;
+      if (!sdpOffer)
+        throw new Error(
+          "The browser did not create an audio connection offer.",
+        );
       const response = await fetch("/api/session", {
         method: "POST",
         headers: {
           "Content-Type": "application/sdp",
           [settingsHeader]: JSON.stringify(settings),
         },
-        body: offer.sdp,
+        body: sdpOffer,
         signal: this.abort.signal,
       });
       if (!response.ok) {
@@ -118,7 +127,12 @@ export class RealtimeTransport {
           body.error || "Could not connect to the voice assistant.",
         );
       }
-      const sdp = await response.text();
+      const result = await response.json();
+      const sdp = result.transport?.sdp;
+      if (typeof sdp !== "string")
+        throw new Error(
+          "The voice service returned an invalid connection answer.",
+        );
       if (!this.closed)
         await peer.setRemoteDescription({ type: "answer", sdp });
     } catch (cause) {
@@ -141,9 +155,80 @@ export class RealtimeTransport {
     await this.audio.play();
   }
 
+  silence(): void {
+    this.setMuted(true);
+    this.audio.pause();
+  }
+
+  private waitForIce(peer: RTCPeerConnection): Promise<void> {
+    if (peer.iceGatheringState === "complete") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        peer.removeEventListener("icegatheringstatechange", changed);
+        this.abort.signal.removeEventListener("abort", aborted);
+        if (error) reject(error);
+        else resolve();
+      };
+      const changed = () => {
+        if (peer.iceGatheringState === "complete") finish();
+      };
+      const aborted = () => finish(new Error("Connection cancelled."));
+      const timer = setTimeout(
+        () =>
+          finish(
+            new Error("Audio network discovery timed out. Try reconnecting."),
+          ),
+        10_000,
+      );
+      peer.addEventListener("icegatheringstatechange", changed);
+      this.abort.signal.addEventListener("abort", aborted, { once: true });
+      if (this.abort.signal.aborted) aborted();
+      else changed();
+    });
+  }
+
+  /** GPT-Live has no end-of-spoken-response event; measure received audio instead. */
+  private async observeAudio(): Promise<void> {
+    if (this.closed || !this.peer) return;
+    let speaking = false;
+    try {
+      const stats = await this.peer.getStats();
+      stats.forEach((report) => {
+        if (report.type !== "inbound-rtp" || report.kind !== "audio") return;
+        if (
+          typeof report.totalAudioEnergy !== "number" ||
+          typeof report.totalSamplesDuration !== "number"
+        )
+          return;
+        const sample = {
+          energy: report.totalAudioEnergy,
+          duration: report.totalSamplesDuration,
+        };
+        if (this.lastAudio && sample.duration > this.lastAudio.duration) {
+          const level = Math.sqrt(
+            Math.max(0, sample.energy - this.lastAudio.energy) /
+              (sample.duration - this.lastAudio.duration),
+          );
+          speaking = level > 0.008 && !this.audio.paused;
+        }
+        this.lastAudio = sample;
+      });
+    } catch {
+      /* Audio still works in browsers without usable energy statistics. */
+    }
+    if (this.closed) return;
+    if (speaking !== this.speaking) {
+      this.speaking = speaking;
+      this.callbacks.onSpeaking(speaking);
+    }
+    this.audioTimer = setTimeout(() => void this.observeAudio(), 150);
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.audioTimer) clearTimeout(this.audioTimer);
     this.clearTimer();
     this.abort.abort();
     if (this.channel) {

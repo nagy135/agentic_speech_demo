@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { Activity } from "@/lib/realtime/types";
+import type { Activity } from "@/lib/live/types";
 export function SoundOrb({
   live,
   activity,

@@ -7,12 +7,12 @@ import {
   useSyncExternalStore,
   type RefObject,
 } from "react";
-import { RealtimeClient } from "@/lib/realtime/client";
-import { defaultVoiceSettings } from "@/lib/realtime/settings";
+import { LiveClient } from "@/lib/live/client";
+import { defaultVoiceSettings } from "@/lib/live/settings";
 
-/** Thin React adapter. Browser resources and protocol handling live in lib/realtime. */
-export function useRealtime(audioRef: RefObject<HTMLAudioElement | null>) {
-  const [client] = useState(() => new RealtimeClient());
+/** Thin React adapter. Browser resources and protocol handling live in lib/live. */
+export function useLive(audioRef: RefObject<HTMLAudioElement | null>) {
+  const [client] = useState(() => new LiveClient());
   const [settings, setSettings] = useState({ ...defaultVoiceSettings });
   const snapshot = useSyncExternalStore(
     client.subscribe,
@@ -29,10 +29,9 @@ export function useRealtime(audioRef: RefObject<HTMLAudioElement | null>) {
     setSettings,
     applySettings: () => client.applySettings(settings),
     restart: async () => {
-      client.stop();
+      await client.stop();
       await start();
     },
-    requestResponse: client.requestResponse,
     start,
     stop: client.stop,
     toggleMute: client.toggleMute,
@@ -40,4 +39,4 @@ export function useRealtime(audioRef: RefObject<HTMLAudioElement | null>) {
   };
 }
 
-export type RealtimeController = ReturnType<typeof useRealtime>;
+export type LiveController = ReturnType<typeof useLive>;

@@ -1,11 +1,9 @@
 import { ArrowRight, Mic, MicOff, PhoneOff, X } from "lucide-react";
-import type { RealtimeController } from "@/hooks/use-realtime";
-export function ConversationControls({ voice }: { voice: RealtimeController }) {
-  const live = voice.status === "connected";
-  const connecting = voice.status === "connecting";
+import type { LiveController } from "@/hooks/use-live";
+export function ConversationControls({ voice }: { voice: LiveController }) {
   return (
     <div className="conversation-actions">
-      {!live && !connecting && (
+      {voice.status === "idle" && (
         <button className="primary-button" onClick={() => void voice.start()}>
           <Mic size={18} />
           {voice.transcript.length
@@ -14,13 +12,18 @@ export function ConversationControls({ voice }: { voice: RealtimeController }) {
           <ArrowRight size={17} />
         </button>
       )}
-      {connecting && (
-        <button className="secondary-button" onClick={voice.stop}>
+      {voice.status === "connecting" && (
+        <button className="secondary-button" onClick={() => void voice.stop()}>
           <X size={17} />
           Cancel connection
         </button>
       )}
-      {live && (
+      {voice.status === "closing" && (
+        <button className="secondary-button" disabled>
+          Ending conversation…
+        </button>
+      )}
+      {voice.status === "connected" && (
         <>
           <button
             className={`primary-button mute-button ${voice.muted ? "is-muted" : ""}`}
@@ -30,18 +33,9 @@ export function ConversationControls({ voice }: { voice: RealtimeController }) {
             {voice.muted ? <MicOff size={18} /> : <Mic size={18} />}
             {voice.muted ? "Unmute microphone" : "Mute microphone"}
           </button>
-          <button className="end-button" onClick={voice.stop}>
+          <button className="end-button" onClick={() => void voice.stop()}>
             <PhoneOff size={17} /> End chat
           </button>
-          {!voice.activeSettings.createResponse && (
-            <button
-              className="secondary-button"
-              disabled={!voice.canRespond || voice.settingsApplying}
-              onClick={voice.requestResponse}
-            >
-              <ArrowRight size={17} /> Reply now
-            </button>
-          )}
         </>
       )}
     </div>

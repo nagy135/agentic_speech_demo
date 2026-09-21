@@ -1,5 +1,5 @@
 {
-  description = "First Note — Next.js and OpenAI Realtime instrument finder";
+  description = "First Note — Next.js and GPT-Live instrument finder";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

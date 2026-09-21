@@ -1,7 +1,7 @@
 import { createSessionConfig } from "@/lib/session";
 import { isSameOrigin } from "@/lib/http/is-same-origin";
 import { readSessionError } from "@/lib/openai/session-error";
-import { parseVoiceSettings, settingsHeader } from "@/lib/realtime/settings";
+import { parseVoiceSettings, settingsHeader } from "@/lib/live/settings";
 
 export const runtime = "nodejs";
 export const maxDuration = 40;
@@ -70,19 +70,22 @@ export async function POST(request: Request) {
       { status: 400, headers },
     );
   }
-  const form = new FormData();
-  form.set("sdp", sdp);
-  form.set("session", JSON.stringify(createSessionConfig(settings)));
   try {
-    const upstream = await fetch("https://api.openai.com/v1/realtime/calls", {
+    const upstream = await fetch("https://api.openai.com/v1/live/sessions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-      body: form,
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        session: createSessionConfig(settings),
+        transport: { type: "webrtc", sdp },
+      }),
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]),
     });
     if (!upstream.ok) {
       const failure = await readSessionError(upstream);
-      console.error("Realtime session rejected", {
+      console.error("GPT-Live session rejected", {
         status: upstream.status,
         code: failure.code,
         type: failure.type,
@@ -101,9 +104,19 @@ export async function POST(request: Request) {
         },
       );
     }
-    return new Response(await upstream.text(), {
-      headers: { ...headers, "Content-Type": "application/sdp" },
-    });
+    const result = await upstream.json();
+    if (
+      typeof result.session?.id !== "string" ||
+      typeof result.transport?.sdp !== "string"
+    )
+      throw new Error("Invalid session response");
+    return Response.json(
+      {
+        session: { id: result.session.id },
+        transport: { type: "webrtc", sdp: result.transport.sdp },
+      },
+      { headers },
+    );
   } catch {
     return Response.json(
       {

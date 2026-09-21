@@ -28,7 +28,7 @@ function isSuggestion(
     value.reason.length <= 600
   );
 }
-function normalize(text: string) {
+export function normalizeTranscript(text: string) {
   return text
     .normalize("NFKC")
     .toLocaleLowerCase()
@@ -94,8 +94,10 @@ export function executeTool(
     if (
       args.explicitlyConfirmed !== true ||
       typeof args.confirmationQuote !== "string" ||
-      !normalize(args.confirmationQuote) ||
-      !normalize(turn.text).includes(normalize(args.confirmationQuote))
+      !normalizeTranscript(args.confirmationQuote) ||
+      !normalizeTranscript(turn.text).includes(
+        normalizeTranscript(args.confirmationQuote),
+      )
     ) {
       return reject(
         "Confirmation was not grounded in the latest user transcript. Ask the user to explicitly confirm this instrument, then retry with their original words.",

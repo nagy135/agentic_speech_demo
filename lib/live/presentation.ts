@@ -1,6 +1,7 @@
-import type { RealtimeSnapshot } from "./types";
+import type { LiveSnapshot } from "./types";
 
-export function getConversationTitle(voice: RealtimeSnapshot): string {
+export function getConversationTitle(voice: LiveSnapshot): string {
+  if (voice.status === "closing") return "Wrapping up our conversation…";
   if (voice.status === "connecting") return "Getting in tune…";
   if (voice.selection.choice) return "Sounds like a beautiful beginning.";
   if (voice.status !== "connected")

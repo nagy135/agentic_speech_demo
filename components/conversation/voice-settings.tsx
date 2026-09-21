@@ -1,134 +1,99 @@
 import { SlidersHorizontal } from "lucide-react";
-import type { RealtimeController } from "@/hooks/use-realtime";
+import type { LiveController } from "@/hooks/use-live";
 import {
+  LIVE_MODEL,
+  backendModels,
+  voices,
   defaultVoiceSettings,
   type VoiceSettings as Settings,
-} from "@/lib/realtime/settings";
+} from "@/lib/live/settings";
 
-export function VoiceSettings({ voice }: { voice: RealtimeController }) {
+export function VoiceSettings({ voice }: { voice: LiveController }) {
   const { settings, setSettings } = voice;
-  const live = voice.status === "connected";
-  const locked = voice.status === "connecting" || voice.settingsApplying;
+  const connected = voice.status === "connected";
+  const locked =
+    ["connecting", "closing"].includes(voice.status) || voice.settingsApplying;
   const dirty =
     JSON.stringify(settings) !== JSON.stringify(voice.activeSettings);
-  const needsRestart = live && settings.model !== voice.activeSettings.model;
+  const needsRestart =
+    connected && settings.voice !== voice.activeSettings.voice;
   function change<K extends keyof Settings>(key: K, value: Settings[K]) {
     setSettings((previous) => ({ ...previous, [key]: value }));
   }
   return (
     <details className="voice-settings">
       <summary>
-        <SlidersHorizontal size={16} /> Voice settings{" "}
-        <span>Debug controls</span>
+        <SlidersHorizontal size={16} /> Voice settings <span>GPT-Live</span>
       </summary>
       <div className="voice-settings-content">
         <p className="settings-intro">
-          {live
-            ? "Tune this chat live. Changing the model requires a restart."
-            : "Choose how Melody listens and replies. These settings apply when you start a chat."}
+          <strong>{LIVE_MODEL}</strong> listens and speaks at the same time. It
+          manages pauses, replies and interruptions automatically.
         </p>
         <fieldset disabled={locked} className="settings-fields">
-          <legend className="sr-only">Conversation settings</legend>
+          <legend className="sr-only">GPT-Live settings</legend>
           <div className="settings-grid">
-            <label className="settings-field" htmlFor="voice-model">
-              <span>Model</span>
+            <label className="settings-field" htmlFor="voice-name">
+              <span>Voice</span>
               <select
-                id="voice-model"
-                value={settings.model}
+                id="voice-name"
+                value={settings.voice}
                 onChange={(e) =>
-                  change("model", e.target.value as Settings["model"])
+                  change("voice", e.target.value as Settings["voice"])
                 }
               >
-                <option value="default">Deployment default</option>
-                <option value="gpt-realtime">gpt-realtime</option>
-                <option value="gpt-realtime-mini">gpt-realtime-mini</option>
+                {voices.map((name) => (
+                  <option value={name} key={name}>
+                    {name[0].toUpperCase() + name.slice(1)}
+                  </option>
+                ))}
               </select>
-              <small>Requires a new conversation when changed.</small>
+              <small>Changing voice requires a new conversation.</small>
             </label>
-            <label className="settings-field" htmlFor="voice-turn-detection">
-              <span>Turn detection</span>
+            <label className="settings-field" htmlFor="voice-backend">
+              <span>Reasoning &amp; tools model</span>
               <select
-                id="voice-turn-detection"
-                value={settings.turnDetection}
+                id="voice-backend"
+                value={settings.backendModel}
                 onChange={(e) =>
                   change(
-                    "turnDetection",
-                    e.target.value as Settings["turnDetection"],
+                    "backendModel",
+                    e.target.value as Settings["backendModel"],
                   )
                 }
               >
-                <option value="semantic_vad">Semantic VAD</option>
-                <option value="server_vad">Server VAD</option>
+                {backendModels.map((model) => (
+                  <option value={model} key={model}>
+                    {model}
+                  </option>
+                ))}
               </select>
               <small>
-                {settings.turnDetection === "semantic_vad"
-                  ? "Listens for a completed thought."
-                  : "Listens for a pause in your speech."}
+                Handles instrument suggestions. Can change during a chat; the
+                voice model stays GPT-Live.
               </small>
             </label>
-            {settings.turnDetection === "semantic_vad" ? (
-              <label className="settings-field" htmlFor="voice-eagerness">
-                <span>Reply eagerness</span>
-                <select
-                  id="voice-eagerness"
-                  value={settings.eagerness}
-                  onChange={(e) =>
-                    change("eagerness", e.target.value as Settings["eagerness"])
-                  }
-                >
-                  <option value="auto">Auto (medium)</option>
-                  <option value="low">Low — allow longer pauses</option>
-                  <option value="medium">Medium — balanced</option>
-                  <option value="high">High — reply sooner</option>
-                </select>
-                <small>
-                  Higher eagerness may cut into pauses in your speech.
-                </small>
-              </label>
-            ) : (
-              <>
-                <label className="settings-field" htmlFor="voice-silence">
-                  <span>
-                    Pause before replying{" "}
-                    <output>{settings.silenceDurationMs} ms</output>
-                  </span>
-                  <input
-                    id="voice-silence"
-                    type="range"
-                    min="100"
-                    max="2000"
-                    step="50"
-                    value={settings.silenceDurationMs}
-                    onChange={(e) =>
-                      change("silenceDurationMs", Number(e.target.value))
-                    }
-                  />
-                  <small>
-                    100–2,000 ms. Shorter pauses trigger faster replies.
-                  </small>
-                </label>
-                <label className="settings-field" htmlFor="voice-threshold">
-                  <span>
-                    Speech threshold{" "}
-                    <output>{settings.threshold.toFixed(2)}</output>
-                  </span>
-                  <input
-                    id="voice-threshold"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={settings.threshold}
-                    onChange={(e) =>
-                      change("threshold", Number(e.target.value))
-                    }
-                  />
-                  <small>
-                    Lower detects quieter speech; higher filters more noise.
-                  </small>
-                </label>
-              </>
-            )}
+            <label className="settings-field" htmlFor="voice-backend-limit">
+              <span>
+                Backend output limit{" "}
+                <output>{settings.maxOutputTokens} tokens</output>
+              </span>
+              <input
+                id="voice-backend-limit"
+                type="range"
+                min="256"
+                max="8192"
+                step="256"
+                value={settings.maxOutputTokens}
+                onChange={(e) =>
+                  change("maxOutputTokens", Number(e.target.value))
+                }
+              />
+              <small>
+                Limits each backend response. Too low can interrupt a tool call;
+                it does not limit spoken replies.
+              </small>
+            </label>
             <label className="settings-field" htmlFor="voice-transcript-wait">
               <span>
                 Confirmation transcript wait{" "}
@@ -146,33 +111,9 @@ export function VoiceSettings({ voice }: { voice: RealtimeController }) {
                 }
               />
               <small>
-                Only for confirming an instrument. A shorter wait may require
-                you to repeat your choice.
+                Only for verifying a final choice. It never delays ordinary
+                speech or interruptions.
               </small>
-            </label>
-          </div>
-          <div className="settings-toggles">
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.interruptResponse}
-                onChange={(e) => change("interruptResponse", e.target.checked)}
-              />
-              <span>
-                Allow interruptions
-                <small>Stop Melody when you start speaking.</small>
-              </span>
-            </label>
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.createResponse}
-                onChange={(e) => change("createResponse", e.target.checked)}
-              />
-              <span>
-                Automatic replies
-                <small>When off, click “Reply now” after speaking.</small>
-              </span>
             </label>
           </div>
           <div className="settings-actions">
@@ -183,7 +124,7 @@ export function VoiceSettings({ voice }: { voice: RealtimeController }) {
             >
               Reset defaults
             </button>
-            {live &&
+            {connected &&
               (needsRestart ? (
                 <button
                   type="button"
@@ -208,15 +149,24 @@ export function VoiceSettings({ voice }: { voice: RealtimeController }) {
           {voice.settingsApplying
             ? "Applying settings…"
             : needsRestart
-              ? "Restart required: changing the model clears this conversation and starts a new chat with your settings."
-              : live
+              ? "Restart required: changing the voice clears this conversation and starts a new chat."
+              : connected
                 ? dirty
                   ? "Changes ready to apply without restarting."
                   : "Settings active in this chat."
-                : voice.status === "connecting"
-                  ? "Connecting with your settings…"
-                  : "Your choices stay here until you reload the page."}
+                : voice.status === "closing"
+                  ? "Finishing the current session…"
+                  : voice.status === "connecting"
+                    ? "Connecting to GPT-Live…"
+                    : "These settings apply to your next chat and stay selected until you reload."}
         </p>
+        {voice.sessionId && (
+          <p className="settings-status">
+            Session: {voice.sessionId} · Reported voice usage:{" "}
+            {voice.usageSeconds.toFixed(1)} s
+            {voice.backendWorking ? " · Backend working" : ""}
+          </p>
+        )}
       </div>
     </details>
   );

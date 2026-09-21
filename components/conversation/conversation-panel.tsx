@@ -1,13 +1,17 @@
 import { AudioLines, Globe2, Headphones, Volume2 } from "lucide-react";
-import type { RealtimeController } from "@/hooks/use-realtime";
-import { getConversationTitle } from "@/lib/realtime/presentation";
+import type { LiveController } from "@/hooks/use-live";
+import { getConversationTitle } from "@/lib/live/presentation";
 import { SoundOrb } from "./sound-orb";
 import { ConversationControls } from "./conversation-controls";
-export function ConversationPanel({ voice }: { voice: RealtimeController }) {
+export function ConversationPanel({ voice }: { voice: LiveController }) {
   const live = voice.status === "connected";
   const connecting = voice.status === "connecting";
   const choice = voice.selection.choice;
-  const latestCaption = voice.transcript.at(-1);
+  const captions = (["user", "assistant"] as const)
+    .map((role) =>
+      voice.transcript.filter((entry) => entry.role === role).at(-1),
+    )
+    .filter((entry) => !!entry);
   return (
     <section
       className={`conversation-panel ${live ? "is-live" : ""}`}
@@ -27,9 +31,11 @@ export function ConversationPanel({ voice }: { voice: RealtimeController }) {
           <span />
           {live
             ? "Connected"
-            : connecting
-              ? "Connecting"
-              : "Ready when you are"}
+            : voice.status === "closing"
+              ? "Ending chat"
+              : connecting
+                ? "Connecting"
+                : "Ready when you are"}
         </div>
       </div>
       <div className="conversation-body">
@@ -47,11 +53,11 @@ export function ConversationPanel({ voice }: { voice: RealtimeController }) {
             {connecting
               ? "Allow your microphone and we’ll take it from there."
               : live
-                ? `Talk naturally${voice.activeSettings.interruptResponse ? ", interrupt anytime" : ""}, and switch languages whenever you like.${voice.activeSettings.createResponse ? "" : " Click Reply now after speaking."}`
+                ? "Talk naturally, interrupt anytime, and switch languages whenever you like. GPT-Live can listen while speaking."
                 : "Tell me what you love listening to, and a little about yourself. I’ll help you discover an instrument that fits."}
           </p>
           <ConversationControls voice={voice} />
-          {!live && !connecting && (
+          {voice.status === "idle" && (
             <p className="microphone-note">
               Just your voice. No musical experience needed.
             </p>
@@ -71,12 +77,13 @@ export function ConversationPanel({ voice }: { voice: RealtimeController }) {
           {voice.error}
         </div>
       )}
-      {live && latestCaption && (
-        <div className="live-caption">
-          <span>{latestCaption.role === "assistant" ? "MELODY" : "YOU"}</span>
-          <p>{latestCaption.text}</p>
-        </div>
-      )}
+      {live &&
+        captions.map((caption) => (
+          <div className="live-caption" key={caption.role}>
+            <span>{caption.role === "assistant" ? "MELODY" : "YOU"}</span>
+            <p>{caption.text}</p>
+          </div>
+        ))}
       <div className="panel-footer">
         <span>
           <Globe2 size={15} />

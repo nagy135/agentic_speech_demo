@@ -1,6 +1,6 @@
 # First Note
 
-A Next.js voice demo that helps someone discover an instrument they would love to learn. Click **Let’s find my instrument**, allow the microphone, and talk with Melody. The conversation starts in English and follows your language when you switch.
+A Next.js voice demo that helps someone discover an instrument they would love to learn. Click **Let’s find my instrument**, allow the microphone, and talk with Melody. The conversation uses **GPT-Live (`gpt-live-1`)**, starts in English, and follows your language when you switch.
 
 ## Run locally
 
@@ -12,85 +12,90 @@ cp .env.example .env
 pnpm dev
 ```
 
-Open <http://localhost:3000>. The Nix flake supports Apple Silicon macOS, plus ARM64 and x86-64 Linux. `flake.lock` pins Node.js **24.20.0**, pnpm **10.34.5**, and Python for the optional catalogue generator. `package.json` also pins pnpm 10.34.5. Without Nix, install Node 24 and that pnpm version before running the same commands.
-
-Nix only sees tracked files in a Git checkout: if you copy this project into a fresh repository, stage `flake.nix` and `flake.lock` before `nix develop` (or use `nix develop path:.`).
+Open <http://localhost:3000>. The Nix flake supports Apple Silicon macOS, ARM64 Linux, and x86-64 Linux. It pins Node.js **24.20.0** and pnpm **10.34.5**. Without Nix, install those versions before running the commands above. Nix only sees tracked files; use `nix develop path:.` in a new, untracked checkout.
 
 ## Production with Docker
 
-Create `.env` with the variables below, then run:
+Create `.env`, then run:
 
 ```sh
 docker compose up --build -d
 ```
 
-Open <http://localhost:3000>. Stop a local `pnpm dev` process first if it already uses port 3000. Use `docker compose logs -f app` for logs and `docker compose down` to stop it.
+Docker binds to localhost. Set `APP_PORT` to change the host port; nixpi uses **13004** and nginx serves <https://speech.infiniter.tech> with TLS. The Dockerfile builds the Next.js standalone output and runs it as the unprivileged `node` user. No API key is required at build time. `.dockerignore` excludes `.env` files from the build context.
 
-Docker binds to localhost only. Set `APP_PORT` in `.env` to change the host port. On nixpi, use `APP_PORT=13004`; the nix-server configuration serves it at <https://speech.infiniter.tech> through nginx with an automatically renewed TLS certificate.
+Use `docker compose logs -f app` for logs. A reverse proxy should preserve `Host` and overwrite `X-Forwarded-Proto` with the public request's scheme for origin validation. Microphone access requires localhost or HTTPS.
 
-The Dockerfile builds with Node 24.20.0 and pnpm 10.34.5, then runs only the Next.js standalone output and static assets as the unprivileged `node` user. Compose reads `.env` at runtime; `.dockerignore` excludes all `.env` files from the build context. No API key is required to build the image. For a remote hostname, serve it through HTTPS so browsers allow microphone access. A reverse proxy should preserve the original `Host` header and overwrite `X-Forwarded-Proto` with the public request's scheme for origin validation.
+## Configuration
 
-## Environment variables
+| Variable         | Required | Purpose                                                             |
+| ---------------- | -------- | ------------------------------------------------------------------- |
+| `OPENAI_API_KEY` | Yes      | Server-only project key with GPT-Live and Responses backend access. |
+| `APP_PORT`       | No       | Docker host port; defaults to `3000`.                               |
 
-| Variable                | Required | Default        | Purpose                                                                      |
-| ----------------------- | -------- | -------------- | ---------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`        | Yes      | —              | A server-only OpenAI API key with Realtime access and API billing available. |
-| `OPENAI_REALTIME_MODEL` | No       | `gpt-realtime` | Model used for speech-to-speech conversation.                                |
-| `OPENAI_REALTIME_VOICE` | No       | `marin`        | Realtime output voice.                                                       |
+The voice model is `gpt-live-1`. Old `OPENAI_REALTIME_MODEL` and `OPENAI_REALTIME_VOICE` variables are no longer used. The website controls the voice, Responses backend model, backend output budget, and confirmation transcript wait. There are no `NEXT_PUBLIC_` credentials or separate transcription service. Voice duration and backend model usage are billed separately by OpenAI.
 
-No `NEXT_PUBLIC_` credentials, separate speech service, image API, or database are needed. Restart the dev server after editing `.env`. The API key never goes to the browser. Audio and input transcription use your OpenAI API project and incur API usage.
+## How the conversation works
 
-## How it works
+1. The browser creates a WebRTC offer, gathers ICE candidates, and sends the SDP and validated UI settings to `POST /api/session`.
+2. Our server sends JSON to OpenAI's `POST /v1/live/sessions` with `model: "gpt-live-1"`, conversation instructions, a voice, and Responses delegation. It returns only the session ID and SDP answer.
+3. Audio streams directly between the browser and OpenAI. The browser waits for `session.started`, then requests Melody's greeting with `session.instructions.append`.
+4. GPT-Live decides when to speak and when a request needs backend work. OpenAI passes the relevant conversation context to **GPT-5.6 Terra** (or the selected **GPT-5.6 Luna**), configured with the catalogue, business rules, and function tools.
+5. Completed function calls arrive as nested `response.output_item.done` events inside `response.event`. The browser collects them by response/delegation, executes the validated handlers after backend completion, sends `response.item.create` results, then `response.create` to continue the backend. Completion snapshots may have empty output; they are not the source of tool arguments.
+6. GPT-Live communicates the backend's result while continuing to listen. Interruptions do not inherently cancel delegated work; the app rejects stale tool actions if newer user speech arrived after that delegation began.
+7. **End chat** immediately silences local input/output, sends `session.close`, and waits for `session.closed` before releasing WebRTC resources. Final voice usage appears in the debug panel. Restart waits for shutdown before opening a fresh session.
 
-1. The browser requests the microphone after the start button is clicked and creates a WebRTC SDP offer.
-2. `POST /api/session` forwards the SDP plus server-owned session instructions, catalogue and tool definitions to OpenAI's `/v1/realtime/calls`. Only the SDP answer returns to the browser.
-3. WebRTC carries microphone input and assistant audio directly between the browser and OpenAI. The data channel carries transcripts and function calls. Semantic voice activity detection allows natural turn-taking and interruption.
-4. Completed tool calls update the interface, then return `function_call_output` to OpenAI. A subsequent response lets Melody continue speaking about the instruments.
+Our server handles connection setup; it does not relay ongoing audio or execute the instrument tools. There is no database, purchase, or persistent confirmed-choice record.
 
-The implementation follows the [gpt-realtime announcement supplied for this demo](https://openai.com/index/introducing-gpt-realtime/?video=1113635977), the [official WebRTC unified-interface guide](https://developers.openai.com/api/docs/guides/voice-webrtc?api=realtime), and the [Realtime conversations/function-calling guide](https://developers.openai.com/api/docs/guides/realtime-conversations).
+See the official [GPT-Live WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live), [delegation guide](https://developers.openai.com/api/docs/guides/live-delegation), and [session lifecycle guide](https://developers.openai.com/api/docs/guides/live-conversations).
 
 ### Voice settings
 
-Expand **Voice settings** in the bottom-right corner to tune the model, turn detection, reply eagerness, silence duration, speech threshold, interruptions, automatic replies, and confirmation transcript wait. Only controls supported by the selected turn-detection mode are shown.
+Expand **Voice settings** in the bottom-right corner. Settings remain selected until the page reloads. **Reset defaults** restores the defaults; during a chat, apply or restart to activate them.
 
-Before connecting, the settings apply to the next chat. During a chat, **Apply to this chat** sends a `session.update` directly to OpenAI over the WebRTC data channel and waits for acknowledgement. The transcript wait is local to the browser. Model changes show **Restart chat & apply**, which starts a fresh conversation and clears the previous transcript and selections. Settings remain selected until the page is reloaded; **Reset defaults** restores the original values.
+| Control                      | Default         | During a chat                                                                 |
+| ---------------------------- | --------------- | ----------------------------------------------------------------------------- |
+| Voice model                  | `gpt-live-1`    | Fixed; the app exclusively uses GPT-Live.                                     |
+| Voice                        | `marin`         | **Restart chat & apply**; clears the previous conversation and selection.     |
+| Reasoning & tools model      | `gpt-5.6-terra` | **Apply to this chat**; also offers `gpt-5.6-luna`.                           |
+| Backend output limit         | 2048 tokens     | Live update; range 256–8192. Too low can leave a backend response incomplete. |
+| Confirmation transcript wait | 2500 ms         | Local update; range 0–5000 ms. Does not affect ordinary speech latency.       |
 
-Turning automatic replies off keeps speech detection enabled and shows **Reply now** for manually requesting a response after speaking. The initial greeting and tool continuations still run. A shorter confirmation transcript wait never bypasses confirmation checks: if evidence is missing, the tool rejects the choice.
+Backend settings updates use `session.update` and become active only after the matching `session.updated` acknowledgement. GPT-Live manages turn-taking continuously: Realtime's VAD mode, eagerness, silence threshold, automatic-response switch, and manual Reply now control do not apply and have been removed.
 
-The initial `POST /api/session` includes the settings in an `X-Voice-Settings` header. The server validates allowed values and retains ownership of instructions, tools, and credentials. The model dropdown offers the deployment default, `gpt-realtime`, and `gpt-realtime-mini`.
+### Tools and confirmation
 
-### The two tools
+- **`suggest_instrument`** displays 1–3 valid catalogue instruments with personalized reasons. It replaces the shortlist without finalizing a choice.
+- **`finalize_choice`** requires a previously suggested instrument, a later user utterance, explicit confirmation, and a quote grounded in the user's latest transcript. It replaces the shortlist with the confirmed choice.
 
-- **`suggest_instrument`** accepts 1–3 distinct catalogue IDs with personalized reasons. It replaces the current shortlist with illustrated cards containing a title and two-line truncated text. The assistant can continue talking while the cards remain visible.
-- **`finalize_choice`** accepts one previously suggested ID, a short reason, `explicitlyConfirmed: true`, and an original-language `confirmationQuote`. It clears suggestions and shows a single highlighted “Your choice” card.
+Voice and backend prompts both distinguish interest, comparisons, and hypothetical choices from confirmation. The application validates IDs, a later utterance, quoted evidence, and whether the request became stale. If evidence is missing or ambiguous, the tool fails closed and Melody asks again. Finalization does not end the conversation.
 
-The assistant is explicitly instructed to distinguish interest and questions from confirmation and ask when uncertain. The application additionally requires a later user turn and checks the confirmation quote against the latest transcript; missing evidence fails closed. Transcription can lag speech, so finalization waits briefly for it. Interpreting whether an utterance is explicit confirmation is still the model's responsibility; the quote check is grounding, not a separate semantic classifier. When transcription differs from the quote, Melody asks the user to repeat their choice. Finalizing does not end the conversation; users can ask about getting started. “Explore again” begins a fresh session.
+GPT-Live sends timestamped transcript fragments, not completed user-turn events. The app retains fragments, orders late arrivals by source time, and groups each speaker independently across short gaps. Overlapping assistant acknowledgements do not split the user's utterance. This grouping only affects captions and confirmation evidence, never audio transmission or response timing. Closely spaced utterances can be grouped together, causing confirmation to be requested again. Transcript and prompt checks do not replace a separate semantic consent classifier.
 
-### Catalogue and UI
+The speaking indicator uses received WebRTC audio energy rather than backend completion events. Caption updates and backend activity remain independent.
 
-- `data/instruments.json`: **54** fictional instrument entries across strings, keys, woodwinds, brass and percussion. Each includes a description, genres, learning curve, practice volume, portability and local image path.
-- `public/instruments/`: bundled SVG illustrations with no image service dependency. These are stylized illustrations, not product photographs.
-- `scripts/generate-catalogue.py`: regenerates the sample JSON and illustrations. Edit the JSON directly to supply your own catalogue; running the generator replaces those edits.
-- `lib/session.ts`: conversation instructions and session configuration.
+### Project map
+
+- `lib/session.ts`: separate GPT-Live conversation and Responses backend prompts/configuration.
+- `lib/live/`: WebRTC transport, lifecycle, delegated tools, timestamped transcripts, and settings.
+- `hooks/use-live.ts`: React subscription and session controls.
 - `lib/tools.ts`: validated instrument-selection state transitions.
-- `lib/realtime/tool-definitions.ts`: the two API function schemas.
-- `hooks/use-realtime.ts`: a thin React subscription adapter.
-- `lib/realtime/client.ts`: session state, events, transcripts and tool execution.
-- `lib/realtime/transport.ts`: WebRTC, microphone/audio resources and connection cleanup.
-- `components/`: one component per file, grouped into catalogue, conversation, landing and layout.
-- The collection browser is available before connecting. Google Fonts enhance the typography; system font fallbacks work without it.
+- `components/`: conversation, debug panel, catalogue, and layout components.
+- `data/instruments.json`: 54 fictional instruments, with bundled illustrations under `public/instruments/`.
+- `scripts/generate-catalogue.py`: regenerates the demo catalogue and SVG illustrations.
 
 ## Development checks
 
 ```sh
-pnpm run pretty        # Format supported project files with Prettier
-pnpm run pretty:check  # Verify formatting without writing
-pnpm run lint          # ESLint, including Next.js and React rules
+pnpm run pretty:check
+pnpm run lint
 pnpm run typecheck
-pnpm test              # Catalogue, tool guards, session configuration and API route tests
+pnpm test
 pnpm build
 ```
 
-Unit tests cover catalogue validity, shortlist updates, confirmation grounding, session configuration, API proxy validation, and WebRTC resource cleanup with mocked browser APIs. They make no paid API calls. There is no Playwright dependency or browser test runner. The actual audio connection and model-driven language/confirmation behavior should be smoke-tested with your API key: try an English opening, switch to another language, express interest without confirming, then explicitly choose an instrument.
+Tests cover session validation, startup and shutdown, nested tool events, duplicate prevention, stale-request rejection, confirmation grounding, overlapping and late transcripts, and live-settings acknowledgements. They mock browser/network APIs and make no paid calls.
 
-Microphone access requires localhost or HTTPS. For a public deployment, protect the session endpoint with your application's authentication and a shared rate limiter; this local demo intentionally has no user accounts. The development server binds to loopback. Conversations and choices stay in browser memory and are not saved by this app.
+For a live check, confirm the greeting, interrupt while Melody speaks, switch languages, request a shortlist, then explicitly choose an instrument in a later utterance. Verify both the spoken result and the cards. Test voice restart and changing the backend model while connected.
+
+For a public production application, add authentication and shared request limits to session creation. This demo has no user accounts; conversations and choices stay in browser memory.

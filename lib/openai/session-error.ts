@@ -52,18 +52,18 @@ export async function readSessionError(
       type === "rate_limit_error"
     ) {
       message = retryAfter
-        ? `OpenAI's Realtime rate limit was reached. Wait ${retryAfter} seconds before reconnecting. If it persists, check the project's Realtime limits.`
-        : "OpenAI's Realtime rate limit was reached. Wait briefly before reconnecting. If it persists, check the project's Realtime limits.";
+        ? `OpenAI's GPT-Live rate limit was reached. Wait ${retryAfter} seconds before reconnecting. If it persists, check the project's GPT-Live limits.`
+        : "OpenAI's GPT-Live rate limit was reached. Wait briefly before reconnecting. If it persists, check the project's GPT-Live limits.";
     } else {
       message =
-        "OpenAI rejected the session with HTTP 429. Check the API project's quota and Realtime rate limits; OpenAI did not identify which limit in a recognized error code.";
+        "OpenAI rejected the session with HTTP 429. Check the API project's quota and GPT-Live rate limits; OpenAI did not identify which limit in a recognized error code.";
     }
   } else if (response.status === 401) {
     message =
       "OpenAI rejected the API key. Check OPENAI_API_KEY and restart the server.";
   } else if (response.status === 403) {
     message =
-      "This OpenAI project does not have access to the selected Realtime model.";
+      "This OpenAI project does not have access to the selected GPT-Live model.";
   } else {
     message =
       "OpenAI could not start the voice session. Check the model and voice settings and try again.";
