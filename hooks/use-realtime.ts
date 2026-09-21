@@ -8,10 +8,12 @@ import {
   type RefObject,
 } from "react";
 import { RealtimeClient } from "@/lib/realtime/client";
+import { defaultVoiceSettings } from "@/lib/realtime/settings";
 
 /** Thin React adapter. Browser resources and protocol handling live in lib/realtime. */
 export function useRealtime(audioRef: RefObject<HTMLAudioElement | null>) {
   const [client] = useState(() => new RealtimeClient());
+  const [settings, setSettings] = useState({ ...defaultVoiceSettings });
   const snapshot = useSyncExternalStore(
     client.subscribe,
     client.getSnapshot,
@@ -19,10 +21,18 @@ export function useRealtime(audioRef: RefObject<HTMLAudioElement | null>) {
   );
   useEffect(() => () => client.dispose(), [client]);
   const start = useCallback(async () => {
-    if (audioRef.current) await client.start(audioRef.current);
-  }, [audioRef, client]);
+    if (audioRef.current) await client.start(audioRef.current, settings);
+  }, [audioRef, client, settings]);
   return {
     ...snapshot,
+    settings,
+    setSettings,
+    applySettings: () => client.applySettings(settings),
+    restart: async () => {
+      client.stop();
+      await start();
+    },
+    requestResponse: client.requestResponse,
     start,
     stop: client.stop,
     toggleMute: client.toggleMute,

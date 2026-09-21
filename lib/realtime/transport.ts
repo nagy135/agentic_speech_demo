@@ -1,4 +1,9 @@
 import type { ServerEvent } from "./types";
+import {
+  defaultVoiceSettings,
+  settingsHeader,
+  type VoiceSettings,
+} from "./settings";
 
 interface TransportCallbacks {
   onOpen: () => void;
@@ -21,7 +26,7 @@ export class RealtimeTransport {
     private readonly callbacks: TransportCallbacks,
   ) {}
 
-  async connect(): Promise<void> {
+  async connect(settings: VoiceSettings = defaultVoiceSettings): Promise<void> {
     this.timer = setTimeout(
       () =>
         this.fail(
@@ -100,7 +105,10 @@ export class RealtimeTransport {
       if (this.closed) return;
       const response = await fetch("/api/session", {
         method: "POST",
-        headers: { "Content-Type": "application/sdp" },
+        headers: {
+          "Content-Type": "application/sdp",
+          [settingsHeader]: JSON.stringify(settings),
+        },
         body: offer.sdp,
         signal: this.abort.signal,
       });

@@ -1,6 +1,7 @@
 import { createSessionConfig } from "@/lib/session";
 import { isSameOrigin } from "@/lib/http/is-same-origin";
 import { readSessionError } from "@/lib/openai/session-error";
+import { parseVoiceSettings, settingsHeader } from "@/lib/realtime/settings";
 
 export const runtime = "nodejs";
 export const maxDuration = 40;
@@ -26,6 +27,18 @@ export async function POST(request: Request) {
     return Response.json(
       { error: "Expected a WebRTC SDP offer." },
       { status: 415, headers },
+    );
+  }
+  let settings;
+  try {
+    settings = parseVoiceSettings(request.headers.get(settingsHeader));
+  } catch (cause) {
+    return Response.json(
+      {
+        error:
+          cause instanceof Error ? cause.message : "Invalid voice settings.",
+      },
+      { status: 400, headers },
     );
   }
   // Read incrementally so a chunked request cannot bypass the body limit.
@@ -59,7 +72,7 @@ export async function POST(request: Request) {
   }
   const form = new FormData();
   form.set("sdp", sdp);
-  form.set("session", JSON.stringify(createSessionConfig()));
+  form.set("session", JSON.stringify(createSessionConfig(settings)));
   try {
     const upstream = await fetch("https://api.openai.com/v1/realtime/calls", {
       method: "POST",

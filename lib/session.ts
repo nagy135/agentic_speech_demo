@@ -1,21 +1,26 @@
 import { instruments } from "./catalogue";
 import { realtimeTools } from "./realtime/tool-definitions";
+import {
+  defaultVoiceSettings,
+  turnDetectionConfig,
+  type VoiceSettings,
+} from "./realtime/settings";
 
-export function createSessionConfig() {
+export function createSessionConfig(
+  settings: VoiceSettings = defaultVoiceSettings,
+) {
   return {
     type: "realtime",
-    model: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime",
+    model:
+      settings.model === "default"
+        ? process.env.OPENAI_REALTIME_MODEL || "gpt-realtime"
+        : settings.model,
     output_modalities: ["audio"],
     audio: {
       input: {
         noise_reduction: { type: "near_field" },
         transcription: { model: "gpt-4o-mini-transcribe" },
-        turn_detection: {
-          type: "semantic_vad",
-          eagerness: "auto",
-          create_response: true,
-          interrupt_response: true,
-        },
+        turn_detection: turnDetectionConfig(settings),
       },
       output: { voice: process.env.OPENAI_REALTIME_VOICE || "marin" },
     },

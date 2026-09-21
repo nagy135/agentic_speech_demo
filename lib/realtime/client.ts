@@ -1,6 +1,12 @@
 import { emptyChoiceState, executeTool, type UserTurn } from "../tools";
 import { RealtimeTransport } from "./transport";
 import {
+  defaultVoiceSettings,
+  parseVoiceSettings,
+  turnDetectionConfig,
+  type VoiceSettings,
+} from "./settings";
+import {
   isFunctionCall,
   type RealtimeSnapshot,
   type ServerEvent,
@@ -14,6 +20,9 @@ function initialSnapshot(): RealtimeSnapshot {
     muted: false,
     error: null,
     audioBlocked: false,
+    canRespond: false,
+    activeSettings: { ...defaultVoiceSettings },
+    settingsApplying: false,
     transcript: [],
     selection: emptyChoiceState(),
   };
@@ -32,6 +41,12 @@ export class RealtimeClient {
   private readonly handledCalls = new Set<string>();
   private responseActive = false;
   private continuationPending = false;
+  private userSpeaking = false;
+  private settings = { ...defaultVoiceSettings };
+  private pendingSettings: { settings: VoiceSettings; eventId: string } | null =
+    null;
+  private settingsTimer: ReturnType<typeof setTimeout> | null = null;
+  private settingsSequence = 0;
 
   getSnapshot = (): RealtimeSnapshot => this.snapshot;
   subscribe = (listener: () => void): (() => void) => {
@@ -41,13 +56,22 @@ export class RealtimeClient {
     };
   };
 
-  async start(audio: HTMLAudioElement): Promise<void> {
+  async start(
+    audio: HTMLAudioElement,
+    settings: VoiceSettings = defaultVoiceSettings,
+  ): Promise<void> {
     if (this.transport) return;
     this.latestTurn = { sequence: 0, text: "", id: "" };
     this.handledCalls.clear();
     this.responseActive = false;
     this.continuationPending = false;
-    this.update({ ...initialSnapshot(), status: "connecting" });
+    this.userSpeaking = false;
+    this.settings = { ...settings };
+    this.update({
+      ...initialSnapshot(),
+      activeSettings: this.settings,
+      status: "connecting",
+    });
     const transport = new RealtimeTransport(audio, {
       onOpen: () => {
         this.update({ status: "connected" });
@@ -68,7 +92,56 @@ export class RealtimeClient {
       onAudioBlocked: () => this.update({ audioBlocked: true }),
     });
     this.transport = transport;
-    await transport.connect();
+    await transport.connect(this.settings);
+  }
+
+  requestResponse = (): void => {
+    if (!this.snapshot.canRespond) return;
+    this.responseActive = true;
+    this.update({ activity: "thinking" });
+    this.transport?.send({ type: "response.create" });
+  };
+
+  applySettings = (settings: VoiceSettings): void => {
+    if (this.snapshot.status !== "connected" || this.pendingSettings) return;
+    const next = parseVoiceSettings(JSON.stringify(settings));
+    if (next.model !== this.settings.model) {
+      this.update({ error: "End the chat before changing the model." });
+      return;
+    }
+    // Transcript waiting is local; no API update is needed if VAD is unchanged.
+    if (
+      JSON.stringify(turnDetectionConfig(next)) ===
+      JSON.stringify(turnDetectionConfig(this.settings))
+    ) {
+      this.settings = next;
+      this.update({ activeSettings: next });
+      return;
+    }
+    const eventId = `voice-settings-${++this.settingsSequence}`;
+    this.pendingSettings = { settings: next, eventId };
+    this.update({ settingsApplying: true, error: null });
+    this.settingsTimer = setTimeout(() => {
+      this.stop();
+      this.update({
+        error:
+          "The settings update was not confirmed. Start a new chat to apply your settings.",
+      });
+    }, 10_000);
+    this.transport?.send({
+      type: "session.update",
+      event_id: eventId,
+      session: {
+        type: "realtime",
+        audio: { input: { turn_detection: turnDetectionConfig(next) } },
+      },
+    });
+  };
+
+  private clearSettingsUpdate(): void {
+    if (this.settingsTimer) clearTimeout(this.settingsTimer);
+    this.settingsTimer = null;
+    this.pendingSettings = null;
   }
 
   stop = (): void => {
@@ -78,10 +151,12 @@ export class RealtimeClient {
       activity: "listening",
       muted: false,
       audioBlocked: false,
+      settingsApplying: false,
     });
   };
 
   dispose = (): void => {
+    this.clearSettingsUpdate();
     this.transport?.close();
     this.transport = null;
   };
@@ -110,6 +185,12 @@ export class RealtimeClient {
 
   private update(patch: Partial<RealtimeSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
+    this.snapshot.canRespond =
+      this.snapshot.status === "connected" &&
+      this.snapshot.activity !== "speaking" &&
+      !this.responseActive &&
+      !this.userSpeaking &&
+      !!this.latestTurn.id;
     this.listeners.forEach((listener) => listener());
   }
 
@@ -136,11 +217,25 @@ export class RealtimeClient {
 
   private handleEvent(event: ServerEvent): void {
     switch (event.type) {
+      case "session.updated":
+        if (this.pendingSettings) {
+          this.settings = this.pendingSettings.settings;
+          this.clearSettingsUpdate();
+          this.update({
+            activeSettings: this.settings,
+            settingsApplying: false,
+          });
+        }
+        break;
       case "input_audio_buffer.speech_started":
+        this.userSpeaking = true;
         this.update({ activity: "listening" });
         break;
       case "input_audio_buffer.speech_stopped":
-        this.update({ activity: "thinking" });
+        this.userSpeaking = false;
+        this.update({
+          activity: this.settings.createResponse ? "thinking" : "listening",
+        });
         break;
       case "input_audio_buffer.committed":
         this.latestTurn = {
@@ -148,6 +243,7 @@ export class RealtimeClient {
           sequence: this.latestTurn.sequence + 1,
           text: "",
         };
+        this.update({});
         break;
       case "conversation.item.input_audio_transcription.completed":
         if (event.item_id === this.latestTurn.id)
@@ -184,6 +280,13 @@ export class RealtimeClient {
         void this.handleResponse(event);
         break;
       case "error":
+        if (
+          this.pendingSettings &&
+          event.error?.event_id === this.pendingSettings.eventId
+        ) {
+          this.clearSettingsUpdate();
+          this.update({ settingsApplying: false });
+        }
         if (event.error?.code !== "response_cancel_not_active")
           this.update({
             error:
@@ -246,10 +349,11 @@ export class RealtimeClient {
       this.responseActive = true;
       transport.send({ type: "response.create" });
     }
+    this.update({});
   }
 
   private async waitForTranscript(transport: RealtimeTransport): Promise<void> {
-    const deadline = Date.now() + 2500;
+    const deadline = Date.now() + this.settings.transcriptWaitMs;
     while (
       transport === this.transport &&
       !this.latestTurn.text &&

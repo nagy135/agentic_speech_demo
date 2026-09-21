@@ -9,6 +9,7 @@ import { ConversationPanel } from "./conversation/conversation-panel";
 import { ConversationTranscript } from "./conversation/conversation-transcript";
 import { DiscoveryResults } from "./catalogue/discovery-results";
 import { InstrumentCollection } from "./catalogue/instrument-collection";
+import { VoiceSettings } from "./conversation/voice-settings";
 
 export function InstrumentFinder() {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -41,6 +42,7 @@ export function InstrumentFinder() {
         <HowItWorks />
       </main>
       <SiteFooter />
+      <VoiceSettings voice={voice} />
     </div>
   );
 }

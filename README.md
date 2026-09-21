@@ -49,6 +49,16 @@ No `NEXT_PUBLIC_` credentials, separate speech service, image API, or database a
 
 The implementation follows the [gpt-realtime announcement supplied for this demo](https://openai.com/index/introducing-gpt-realtime/?video=1113635977), the [official WebRTC unified-interface guide](https://developers.openai.com/api/docs/guides/voice-webrtc?api=realtime), and the [Realtime conversations/function-calling guide](https://developers.openai.com/api/docs/guides/realtime-conversations).
 
+### Voice settings
+
+Expand **Voice settings** in the bottom-right corner to tune the model, turn detection, reply eagerness, silence duration, speech threshold, interruptions, automatic replies, and confirmation transcript wait. Only controls supported by the selected turn-detection mode are shown.
+
+Before connecting, the settings apply to the next chat. During a chat, **Apply to this chat** sends a `session.update` directly to OpenAI over the WebRTC data channel and waits for acknowledgement. The transcript wait is local to the browser. Model changes show **Restart chat & apply**, which starts a fresh conversation and clears the previous transcript and selections. Settings remain selected until the page is reloaded; **Reset defaults** restores the original values.
+
+Turning automatic replies off keeps speech detection enabled and shows **Reply now** for manually requesting a response after speaking. The initial greeting and tool continuations still run. A shorter confirmation transcript wait never bypasses confirmation checks: if evidence is missing, the tool rejects the choice.
+
+The initial `POST /api/session` includes the settings in an `X-Voice-Settings` header. The server validates allowed values and retains ownership of instructions, tools, and credentials. The model dropdown offers the deployment default, `gpt-realtime`, and `gpt-realtime-mini`.
+
 ### The two tools
 
 - **`suggest_instrument`** accepts 1–3 distinct catalogue IDs with personalized reasons. It replaces the current shortlist with illustrated cards containing a title and two-line truncated text. The assistant can continue talking while the cards remain visible.

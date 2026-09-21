@@ -33,6 +33,15 @@ export function ConversationControls({ voice }: { voice: RealtimeController }) {
           <button className="end-button" onClick={voice.stop}>
             <PhoneOff size={17} /> End chat
           </button>
+          {!voice.activeSettings.createResponse && (
+            <button
+              className="secondary-button"
+              disabled={!voice.canRespond || voice.settingsApplying}
+              onClick={voice.requestResponse}
+            >
+              <ArrowRight size={17} /> Reply now
+            </button>
+          )}
         </>
       )}
     </div>

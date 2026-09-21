@@ -47,7 +47,7 @@ export function ConversationPanel({ voice }: { voice: RealtimeController }) {
             {connecting
               ? "Allow your microphone and we’ll take it from there."
               : live
-                ? "Talk naturally, interrupt anytime, and switch languages whenever you like."
+                ? `Talk naturally${voice.activeSettings.interruptResponse ? ", interrupt anytime" : ""}, and switch languages whenever you like.${voice.activeSettings.createResponse ? "" : " Click Reply now after speaking."}`
                 : "Tell me what you love listening to, and a little about yourself. I’ll help you discover an instrument that fits."}
           </p>
           <ConversationControls voice={voice} />

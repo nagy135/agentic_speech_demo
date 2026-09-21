@@ -1,4 +1,5 @@
 import type { ChoiceState } from "../tools";
+import type { VoiceSettings } from "./settings";
 
 export type ConnectionStatus = "idle" | "connecting" | "connected";
 export type Activity = "listening" | "thinking" | "speaking";
@@ -13,6 +14,9 @@ export interface RealtimeSnapshot {
   muted: boolean;
   error: string | null;
   audioBlocked: boolean;
+  canRespond: boolean;
+  activeSettings: VoiceSettings;
+  settingsApplying: boolean;
   transcript: Transcript[];
   selection: ChoiceState;
 }
@@ -28,7 +32,7 @@ export interface ServerEvent {
   item_id?: string;
   transcript?: string;
   delta?: string;
-  error?: { message?: string; code?: string };
+  error?: { message?: string; code?: string; event_id?: string };
   response?: {
     status?: string;
     output?: Array<Partial<FunctionCall>>;
