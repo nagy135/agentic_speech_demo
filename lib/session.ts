@@ -1,3 +1,4 @@
+import type { MediaSessionConfig } from "openai/resources/live/live";
 import { instruments } from "./catalogue";
 import { liveTools } from "./live/tool-definitions";
 import {
@@ -52,5 +53,5 @@ ${JSON.stringify(instruments.map((instrument) => ({ ...instrument, image: undefi
         parallel_tool_calls: false,
       },
     },
-  };
+  } satisfies MediaSessionConfig;
 }

@@ -1,3 +1,4 @@
+import type { FunctionTool } from "openai/resources/live/live";
 import { instrumentsById } from "../catalogue";
 
 export const liveTools = [
@@ -65,4 +66,4 @@ export const liveTools = [
       additionalProperties: false,
     },
   },
-];
+] satisfies FunctionTool[];

@@ -1,3 +1,4 @@
+import OpenAI from "openai";
 import { createSessionConfig } from "@/lib/session";
 import { isSameOrigin } from "@/lib/http/is-same-origin";
 import { readSessionError } from "@/lib/openai/session-error";
@@ -71,40 +72,19 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const upstream = await fetch("https://api.openai.com/v1/live/sessions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      maxRetries: 0,
+    });
+    const result = await client.live.create(
+      {
         session: createSessionConfig(settings),
         transport: { type: "webrtc", sdp },
-      }),
-      signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]),
-    });
-    if (!upstream.ok) {
-      const failure = await readSessionError(upstream);
-      console.error("GPT-Live session rejected", {
-        status: upstream.status,
-        code: failure.code,
-        type: failure.type,
-        requestId: failure.requestId,
-      });
-      return Response.json(
-        { error: failure.message, code: failure.code },
-        {
-          status: upstream.status === 429 ? 429 : 502,
-          headers: {
-            ...headers,
-            ...(upstream.status === 429 && failure.retryAfter
-              ? { "Retry-After": failure.retryAfter }
-              : {}),
-          },
-        },
-      );
-    }
-    const result = await upstream.json();
+      },
+      {
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]),
+      },
+    );
     if (
       typeof result.session?.id !== "string" ||
       typeof result.transport?.sdp !== "string"
@@ -117,7 +97,28 @@ export async function POST(request: Request) {
       },
       { headers },
     );
-  } catch {
+  } catch (cause) {
+    if (cause instanceof OpenAI.APIError && cause.status !== undefined) {
+      const failure = readSessionError(cause);
+      console.error("GPT-Live session rejected", {
+        status: cause.status,
+        code: failure.code,
+        type: failure.type,
+        requestId: failure.requestId,
+      });
+      return Response.json(
+        { error: failure.message, code: failure.code },
+        {
+          status: cause.status === 429 ? 429 : 502,
+          headers: {
+            ...headers,
+            ...(cause.status === 429 && failure.retryAfter
+              ? { "Retry-After": failure.retryAfter }
+              : {}),
+          },
+        },
+      );
+    }
     return Response.json(
       {
         error:

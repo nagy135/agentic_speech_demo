@@ -1,3 +1,5 @@
+import type { APIError } from "openai";
+
 interface ErrorDetails {
   message: string;
   code: string | null;
@@ -26,22 +28,14 @@ function identifier(value: unknown): string | null {
 }
 
 /** Keep useful error metadata without exposing raw upstream messages or credentials. */
-export async function readSessionError(
-  response: Response,
-): Promise<ErrorDetails> {
-  const payload: unknown = await response.json().catch(() => null);
-  const error =
-    payload && typeof payload === "object" && "error" in payload
-      ? payload.error
-      : null;
-  const details = error && typeof error === "object" ? error : {};
-  const code = identifier("code" in details ? details.code : null);
-  const type = identifier("type" in details ? details.type : null);
-  const retry = response.headers.get("retry-after");
+export function readSessionError(error: APIError): ErrorDetails {
+  const code = identifier(error.code);
+  const type = identifier(error.type);
+  const retry = error.headers?.get("retry-after");
   const retryAfter = retry && /^\d{1,6}$/.test(retry) ? retry : null;
   let message: string;
 
-  if (response.status === 429) {
+  if (error.status === 429) {
     const quotaMessage = quotaMessages[code ?? ""] ?? quotaMessages[type ?? ""];
     if (quotaMessage) {
       message = quotaMessage;
@@ -58,10 +52,10 @@ export async function readSessionError(
       message =
         "OpenAI rejected the session with HTTP 429. Check the API project's quota and GPT-Live rate limits; OpenAI did not identify which limit in a recognized error code.";
     }
-  } else if (response.status === 401) {
+  } else if (error.status === 401) {
     message =
       "OpenAI rejected the API key. Check OPENAI_API_KEY and restart the server.";
-  } else if (response.status === 403) {
+  } else if (error.status === 403) {
     message =
       "This OpenAI project does not have access to the selected GPT-Live model.";
   } else {
@@ -73,7 +67,7 @@ export async function readSessionError(
     message: code ? `${message} (OpenAI: ${code})` : message,
     code,
     type,
-    requestId: response.headers.get("x-request-id"),
+    requestId: error.requestID ?? null,
     retryAfter,
   };
 }

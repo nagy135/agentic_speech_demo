@@ -1,11 +1,14 @@
+import OpenAI from "openai";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readSessionError } from "../lib/openai/session-error";
 
 const failure = (code: string, headers: Record<string, string> = {}) =>
-  Response.json(
+  OpenAI.APIError.generate(
+    429,
     { error: { code, type: code, message: "private upstream message" } },
-    { status: 429, headers },
+    undefined,
+    new Headers(headers),
   );
 
 test("quota exhaustion gives billing/limits guidance instead of suggesting a retry", async () => {
@@ -30,7 +33,7 @@ test("temporary rate limits preserve retry timing and request ID", async () => {
 
 test("an unrecognized 429 does not claim to know which limit was reached", async () => {
   const result = await readSessionError(
-    new Response("not JSON", { status: 429 }),
+    OpenAI.APIError.generate(429, undefined, "not JSON", new Headers()),
   );
   assert.match(result.message, /did not identify/);
   assert.equal(result.code, null);

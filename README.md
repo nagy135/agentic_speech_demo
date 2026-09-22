@@ -38,7 +38,7 @@ The voice model is `gpt-live-1`. Old `OPENAI_REALTIME_MODEL` and `OPENAI_REALTIM
 ## How the conversation works
 
 1. The browser creates a WebRTC offer, gathers ICE candidates, and sends the SDP and validated UI settings to `POST /api/session`.
-2. Our server sends JSON to OpenAI's `POST /v1/live/sessions` with `model: "gpt-live-1"`, conversation instructions, a voice, and Responses delegation. It returns only the session ID and SDP answer.
+2. Our server uses the OpenAI TypeScript SDK (`client.live.create`) to call `POST /v1/live/sessions` with `model: "gpt-live-1"`, conversation instructions, a voice, and Responses delegation. It returns only the session ID and SDP answer.
 3. Audio streams directly between the browser and OpenAI, including silence before the user speaks. After `session.started`, the browser sends greeting instructions, waits for their matching `session.instructions.appended` acknowledgement, then sends a single `session.commentary.append` cue to begin speaking. The cue is skipped if either speaker has already started, the instruction was rejected, or the session is closing.
 4. GPT-Live decides when to speak and when a request needs backend work. OpenAI passes the relevant conversation context to **GPT-5.6 Terra** (or the selected **GPT-5.6 Luna**), configured with the catalogue, business rules, and function tools.
 5. Completed function calls arrive as nested `response.output_item.done` events inside `response.event`. The browser collects them by response/delegation, executes the validated handlers after backend completion, sends `response.item.create` results, then `response.create` to continue the backend. Completion snapshots may have empty output; they are not the source of tool arguments.

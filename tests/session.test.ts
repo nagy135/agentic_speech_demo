@@ -55,7 +55,7 @@ test("session route validates configuration, input, and proxies SDP without expo
   global.fetch = async (input, init) => {
     assert.equal(input, "https://api.openai.com/v1/live/sessions");
     assert.equal(
-      (init?.headers as Record<string, string>).Authorization,
+      new Headers(init?.headers).get("authorization"),
       "Bearer test-server-only-key",
     );
     const payload = JSON.parse(init?.body as string);
@@ -93,15 +93,40 @@ test("session route validates configuration, input, and proxies SDP without expo
   const rejected = await POST(request());
   assert.equal(rejected.status, 502);
   assert.doesNotMatch(await rejected.text(), /sensitive|test-server-only-key/);
-  global.fetch = async () =>
-    Response.json(
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts++;
+    return Response.json(
       { error: { code: "rate_limit_exceeded", type: "rate_limit_error" } },
       { status: 429, headers: { "retry-after": "15" } },
     );
+  };
   const limited = await POST(request());
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get("retry-after"), "15");
   const limitedBody = await limited.json();
   assert.equal(limitedBody.code, "rate_limit_exceeded");
   assert.match(limitedBody.error, /Wait 15 seconds/);
+  assert.equal(attempts, 1, "session creation must not automatically retry");
+
+  attempts = 0;
+  global.fetch = async () => {
+    attempts++;
+    throw new TypeError("sensitive network detail");
+  };
+  const interrupted = await POST(request());
+  assert.equal(interrupted.status, 504);
+  assert.equal(attempts, 1);
+  assert.doesNotMatch(
+    await interrupted.text(),
+    /sensitive|test-server-only-key/,
+  );
+
+  global.fetch = async () => {
+    assert.fail("an aborted request must not reach OpenAI");
+  };
+  const controller = new AbortController();
+  const aborted = new Request(request(), { signal: controller.signal });
+  controller.abort();
+  assert.equal((await POST(aborted)).status, 504);
 });
