@@ -29,6 +29,7 @@ export function useLive(audioRef: RefObject<HTMLAudioElement | null>) {
     settings,
     setSettings,
     applySettings: () => client.applySettings(settings),
+    saveNudge: client.saveNudge,
     restart: async () => {
       await client.stop();
       await start();

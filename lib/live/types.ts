@@ -18,6 +18,8 @@ export interface LiveSnapshot {
   audioBlocked: boolean;
   activeSettings: VoiceSettings;
   settingsApplying: boolean;
+  nudgeMessage: string;
+  nudgeSaving: boolean;
   sessionId: string | null;
   usageSeconds: number;
   transcript: Transcript[];

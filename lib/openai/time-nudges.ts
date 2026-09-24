@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CommentaryAppendEvent } from "openai/resources/live/live";
 import { serverDebug } from "./debug";
+import { defaultNudgeMessage, parseNudgeMessage } from "../live/nudge";
 
 const clock = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Berlin",
@@ -17,10 +18,18 @@ export function createTimeNudges(
     send: (event: CommentaryAppendEvent) => void;
   },
   context: Record<string, unknown>,
+  initialMessage = defaultNudgeMessage,
 ) {
+  let message = parseNudgeMessage(initialMessage);
   let timer: ReturnType<typeof setInterval> | undefined;
   let stopped = false;
   return {
+    setMessage(value: string) {
+      if (stopped) return false;
+      message = parseNudgeMessage(value);
+      serverDebug(context, "sideband.time_nudge.saved", { message });
+      return true;
+    },
     start() {
       if (timer || stopped) return;
       timer = setInterval(() => {
@@ -29,7 +38,10 @@ export function createTimeNudges(
           type: "session.commentary.append",
           event_id: `time-nudge-${randomUUID()}`,
           delegation_id: null,
-          content: `The current time in Berlin (Europe/Berlin) is ${clock.format(new Date())}. Briefly tell the user the time in the language of this conversation.`,
+          content:
+            message.toLowerCase() === defaultNudgeMessage
+              ? `The current time in Berlin (Europe/Berlin) is ${clock.format(new Date())}. Briefly tell the user the time in the language of this conversation.`
+              : message,
         };
         try {
           connection.send(event);

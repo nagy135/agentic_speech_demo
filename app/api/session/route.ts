@@ -6,6 +6,7 @@ import { createSessionConfig } from "@/lib/session";
 import { isSameOrigin } from "@/lib/http/is-same-origin";
 import { readSessionError } from "@/lib/openai/session-error";
 import { parseVoiceSettings, settingsHeader } from "@/lib/live/settings";
+import { defaultNudgeMessage } from "@/lib/live/nudge";
 
 export const runtime = "nodejs";
 export const maxDuration = 40;
@@ -117,10 +118,17 @@ async function createSession(request: Request, requestId: string) {
       "connection.initialized",
       result,
     );
-    const sideband = await attachSideband(client, result.session.id, requestId);
+    const nudge = { token: randomUUID(), message: defaultNudgeMessage };
+    const sideband = await attachSideband(
+      client,
+      result.session.id,
+      requestId,
+      nudge,
+    );
     return Response.json(
       {
         debug: { sideband, requestId },
+        nudge: sideband === "connected" ? nudge : null,
         session: { id: result.session.id },
         transport: { type: "webrtc", sdp: result.transport.sdp },
       },

@@ -96,7 +96,12 @@ function browserFixture(
     "fetch",
     async (_input: unknown, init?: RequestInit) => {
       requests.push(init!);
+      if (_input === "/api/session/nudge")
+        return Response.json({
+          message: JSON.parse(init!.body as string).message,
+        });
       return Response.json({
+        nudge: { token: "session-test-token" },
         session: { id: "live_test" },
         transport: { type: "webrtc", sdp: "v=0\r\nanswer" },
       });
@@ -491,4 +496,49 @@ test("independent user and bot lights follow levels, mute, silence, and shutdown
   assert.equal(client.debug.getSnapshot().botSpeaking, false);
   emit({ type: "session.closed" });
   await stopping;
+});
+
+test("nudge saves require a chat, go to the server with session credentials, and hide tokens from exports", async (t) => {
+  const { client, audio, requests, emit } = browserFixture(t);
+  assert.equal(client.getSnapshot().nudgeMessage, "tell me current time");
+  await assert.rejects(
+    client.saveNudge("Before connect"),
+    /Start a conversation/,
+  );
+  await client.start(audio);
+  await client.saveNudge("Řekni ahoj");
+  const saved = requests.at(-1)!;
+  assert.equal(
+    new Headers(saved.headers).get("Authorization"),
+    "Bearer session-test-token",
+  );
+  assert.deepEqual(JSON.parse(saved.body as string), {
+    sessionId: "live_test",
+    message: "Řekni ahoj",
+  });
+  assert.equal(client.getSnapshot().nudgeMessage, "Řekni ahoj");
+  assert.doesNotMatch(
+    JSON.stringify(client.debug.getSnapshot()),
+    /session-test-token/,
+  );
+  const stopping = client.stop();
+  emit({ type: "session.closed" });
+  await stopping;
+  await client.start(audio);
+  assert.equal(client.getSnapshot().nudgeMessage, "tell me current time");
+});
+
+test("failed nudge saves preserve the previous confirmed message", async (t) => {
+  const { client, audio } = browserFixture(t);
+  await client.start(audio);
+  await client.saveNudge("Previous message");
+  t.mock.method(globalThis, "fetch", async () =>
+    Response.json({ error: "Sideband unavailable" }, { status: 404 }),
+  );
+  await assert.rejects(
+    client.saveNudge("Unaccepted message"),
+    /Sideband unavailable/,
+  );
+  assert.equal(client.getSnapshot().nudgeMessage, "Previous message");
+  assert.equal(client.getSnapshot().nudgeSaving, false);
 });

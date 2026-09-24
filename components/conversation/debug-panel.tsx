@@ -10,6 +10,65 @@ import {
 } from "@/lib/live/debug";
 import type { LiveController } from "@/hooks/use-live";
 
+function NudgeEditor({ voice }: { voice: LiveController }) {
+  const [draft, setDraft] = useState(voice.nudgeMessage);
+  const [feedback, setFeedback] = useState("");
+  return (
+    <form
+      className="debug-nudge"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setFeedback("");
+        try {
+          await voice.saveNudge(draft);
+          setFeedback(
+            "Saved on the server for this conversation. Used on the next 30-second tick.",
+          );
+        } catch (error) {
+          setFeedback(
+            error instanceof Error
+              ? error.message
+              : "Could not save the message.",
+          );
+        }
+      }}
+    >
+      <label htmlFor="sideband-nudge-message">
+        Message sent every 30 seconds
+      </label>
+      <div className="debug-toolbar">
+        <input
+          id="sideband-nudge-message"
+          value={draft}
+          maxLength={400}
+          required
+          disabled={voice.nudgeSaving || voice.status !== "connected"}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setFeedback("");
+          }}
+        />
+        <button
+          type="submit"
+          disabled={voice.nudgeSaving || voice.status !== "connected"}
+        >
+          {voice.nudgeSaving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      <p className="debug-note">
+        Start a chat to edit and save. Stored on the server for this
+        conversation. “tell me current time” uses the current Berlin time; a
+        custom message replaces it.
+      </p>
+      {feedback && (
+        <p className="debug-note" role="status">
+          {feedback}
+        </p>
+      )}
+    </form>
+  );
+}
+
 function SpeakingLight({ label, active }: { label: string; active: boolean }) {
   return (
     <span className="debug-speaker" data-active={active} role="status">
@@ -95,6 +154,7 @@ function EventMonitor({
         Server sideband at setup: {sideband || "Awaiting connection"}. Current
         server activity is in server logs.
       </p>
+      <NudgeEditor key={voice.sessionId || "idle"} voice={voice} />
       <div className="debug-categories" aria-label="Event categories">
         <button
           type="button"

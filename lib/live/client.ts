@@ -3,6 +3,7 @@ import { LiveDebug } from "./debug";
 import { LiveTransport } from "./transport";
 import { LiveTranscripts } from "./transcripts";
 import { greetingCue, greetingInstructions } from "./greeting";
+import { defaultNudgeMessage, parseNudgeMessage } from "./nudge";
 import {
   backendSettings,
   defaultVoiceSettings,
@@ -32,6 +33,8 @@ function initialSnapshot(): LiveSnapshot {
     audioBlocked: false,
     activeSettings: { ...defaultVoiceSettings },
     settingsApplying: false,
+    nudgeMessage: defaultNudgeMessage,
+    nudgeSaving: false,
     sessionId: null,
     usageSeconds: 0,
     transcript: [],
@@ -84,6 +87,22 @@ export class LiveClient {
   private eventId(prefix: string): string {
     return `${prefix}-${++this.commandSequence}`;
   }
+
+  saveNudge = async (value: string): Promise<void> => {
+    if (this.snapshot.nudgeSaving || this.snapshot.status !== "connected")
+      throw new Error("Start a conversation before saving a sideband message.");
+    const message = parseNudgeMessage(value);
+    const transport = this.transport;
+    this.update({ nudgeSaving: true });
+    try {
+      if (transport) await transport.saveNudge(message);
+      if (transport !== this.transport)
+        throw new Error("The conversation changed. Please save again.");
+      this.update({ nudgeMessage: message });
+    } finally {
+      this.update({ nudgeSaving: false });
+    }
+  };
 
   async start(
     audio: HTMLAudioElement,

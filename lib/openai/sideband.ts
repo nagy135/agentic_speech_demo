@@ -2,12 +2,14 @@ import type OpenAI from "openai";
 import { SidebandWS } from "openai/resources/live/sideband/ws";
 import { serverDebug } from "./debug";
 import { createTimeNudges } from "./time-nudges";
+import { registerNudgeSession } from "./nudge-sessions";
 
 /** Send clock nudges and observe the session; the browser still executes tools. */
 export async function attachSideband(
   client: OpenAI,
   sessionId: string,
   requestId: string,
+  nudge?: { token: string; message: string },
 ): Promise<"connected" | "failed"> {
   const context = { requestId, sessionId, transport: "sideband" };
   serverDebug(context, "sideband.connection.initializing");
@@ -25,14 +27,24 @@ export async function attachSideband(
         },
       },
     );
-    const nudges = createTimeNudges(sideband, context);
+    const nudges = createTimeNudges(sideband, context, nudge?.message);
+    const unregister = nudge
+      ? registerNudgeSession(sessionId, {
+          token: nudge.token,
+          setMessage: nudges.setMessage,
+        })
+      : () => {};
+    const stopNudges = () => {
+      unregister();
+      nudges.stop();
+    };
     // A hard bound also releases orphan connections if a peer never completes setup.
     const lifetime = setTimeout(
       () => {
         serverDebug(context, "sideband.connection.expired", {
           maximumHours: 2,
         });
-        nudges.stop();
+        stopNudges();
         sideband.close();
       },
       2 * 60 * 60 * 1000,
@@ -41,7 +53,7 @@ export async function attachSideband(
     const handleLifecycle = (type: string) => {
       if (type === "session.started") nudges.start();
       if (type === "session.closed") {
-        nudges.stop();
+        stopNudges();
         clearTimeout(lifetime);
         sideband.close();
       }
@@ -76,7 +88,7 @@ export async function attachSideband(
       });
     });
     sideband.on("close", (code, reason) => {
-      nudges.stop();
+      stopNudges();
       clearTimeout(lifetime);
       serverDebug(context, "sideband.connection.closed", { code, reason });
     });
@@ -93,7 +105,7 @@ export async function attachSideband(
         sideband.socket.off("error", failed);
         sideband.socket.off("close", failed);
         if (status === "failed") {
-          nudges.stop();
+          stopNudges();
           clearTimeout(lifetime);
           sideband.close();
           serverDebug(context, "sideband.connection.failed");

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import OpenAI from "openai";
 import { WebSocketServer } from "ws";
+import { updateNudgeSession } from "../lib/openai/nudge-sessions";
 import { attachSideband } from "../lib/openai/sideband";
 
 function capture(t: TestContext, onEvent?: (type: string) => void) {
@@ -43,7 +44,10 @@ test("sideband authenticates, observes events, sends time nudges, and stops with
     baseURL: `http://127.0.0.1:${address.port}/v1`,
   });
   const connection = once(server, "connection");
-  const attaching = attachSideband(client, "live_test", "req-test");
+  const attaching = attachSideband(client, "live_test", "req-test", {
+    token: "test-token",
+    message: "tell me current time",
+  });
   const [socket, request] = await connection;
   assert.equal(
     request.url,
@@ -79,6 +83,10 @@ test("sideband authenticates, observes events, sends time nudges, and stops with
     JSON.stringify({ type: "session.closed", reason: "close_requested" }),
   );
   await once(socket, "close");
+  assert.equal(
+    updateNudgeSession("live_test", "test-token", "Too late"),
+    false,
+  );
   assert.ok(
     logs.some((event) => event.type === "sideband.connection.initialized"),
   );

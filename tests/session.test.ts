@@ -109,9 +109,12 @@ test("session route validates configuration, input, and proxies SDP without expo
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   const body = await response.json();
   assert.equal(body.debug.sideband, "connected");
+  assert.equal(body.nudge.message, "tell me current time");
+  assert.match(body.nudge.token, /^[a-f0-9-]{36}$/);
   assert.match(body.debug.requestId, /^[a-f0-9-]{36}$/);
   assert.deepEqual(body, {
     debug: body.debug,
+    nudge: body.nudge,
     session: { id: "live_test" },
     transport: { type: "webrtc", sdp: "v=0\r\nmock-answer" },
   });

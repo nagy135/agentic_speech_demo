@@ -1560,3 +1560,15 @@ button:disabled:hover {
     padding: 10px 12px;
   }
 }
+
+.debug-nudge {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #4a5d51;
+  border-radius: 8px;
+}
+.debug-widget button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

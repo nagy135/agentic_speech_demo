@@ -28,6 +28,7 @@ export class LiveTransport {
   private lastStatsAt = 0;
   private lastInputAudio: { energy: number; duration: number } | null = null;
   private warnedStats = false;
+  private nudgeSession: { sessionId: string; token: string } | null = null;
 
   constructor(
     private readonly audio: HTMLAudioElement,
@@ -202,6 +203,14 @@ export class LiveTransport {
         );
       }
       const result = await response.json();
+      if (
+        typeof result.nudge?.token === "string" &&
+        typeof result.session?.id === "string"
+      )
+        this.nudgeSession = {
+          sessionId: result.session.id,
+          token: result.nudge.token,
+        };
       this.debug.record("http", "received", "http.session.response", {
         status: response.status,
         body: result,
@@ -231,6 +240,34 @@ export class LiveTransport {
         state: this.channel?.readyState,
       });
     }
+  }
+
+  async saveNudge(message: string): Promise<void> {
+    if (this.closed || !this.nudgeSession)
+      throw new Error(
+        "This conversation's sideband is unavailable. Start a new chat and try again.",
+      );
+    const { sessionId, token } = this.nudgeSession;
+    this.debug.record("http", "sent", "http.nudge.request", {
+      sessionId,
+      message,
+    });
+    const response = await fetch("/api/session/nudge", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ sessionId, message }),
+      signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(10_000)]),
+    });
+    const body = await response.json();
+    this.debug.record("http", "received", "http.nudge.response", {
+      status: response.status,
+      body,
+    });
+    if (!response.ok)
+      throw new Error(body.error || "Could not save the message.");
   }
 
   setMuted(muted: boolean): void {
