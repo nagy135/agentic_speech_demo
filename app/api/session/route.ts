@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { randomUUID } from "node:crypto";
 import { serverDebug } from "@/lib/openai/debug";
-import { attachDebugSideband } from "@/lib/openai/sideband";
+import { attachSideband } from "@/lib/openai/sideband";
 import { createSessionConfig } from "@/lib/session";
 import { isSameOrigin } from "@/lib/http/is-same-origin";
 import { readSessionError } from "@/lib/openai/session-error";
@@ -117,11 +117,7 @@ async function createSession(request: Request, requestId: string) {
       "connection.initialized",
       result,
     );
-    const sideband = await attachDebugSideband(
-      client,
-      result.session.id,
-      requestId,
-    );
+    const sideband = await attachSideband(client, result.session.id, requestId);
     return Response.json(
       {
         debug: { sideband, requestId },

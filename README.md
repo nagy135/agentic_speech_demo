@@ -28,11 +28,11 @@ Use `docker compose logs -f app` for logs. A reverse proxy should preserve `Host
 
 ## Configuration
 
-| Variable         | Required | Purpose                                                                         |
-| ---------------- | -------- | ------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY` | Yes      | Server-only project key with GPT-Live and Responses backend access.             |
-| `DEBUG_MODE`     | No       | Set `true` to attach a server sideband and log setup plus every received event. |
-| `APP_PORT`       | No       | Docker host port; defaults to `3000`.                                           |
+| Variable         | Required | Purpose                                                             |
+| ---------------- | -------- | ------------------------------------------------------------------- |
+| `OPENAI_API_KEY` | Yes      | Server-only project key with GPT-Live and Responses backend access. |
+| `DEBUG_MODE`     | No       | Set `true` to log setup, sideband events, and outgoing time nudges. |
+| `APP_PORT`       | No       | Docker host port; defaults to `3000`.                               |
 
 The voice model is `gpt-live-1`. Old `OPENAI_REALTIME_MODEL` and `OPENAI_REALTIME_VOICE` variables are no longer used. The website controls the voice, Responses backend model, backend output budget, and confirmation transcript wait. There are no `NEXT_PUBLIC_` credentials or separate transcription service. Voice duration and backend model usage are billed separately by OpenAI.
 
@@ -46,15 +46,21 @@ The voice model is `gpt-live-1`. Old `OPENAI_REALTIME_MODEL` and `OPENAI_REALTIM
 6. GPT-Live communicates the backend's result while continuing to listen. Interruptions do not inherently cancel delegated work; the app rejects stale tool actions if newer user speech arrived after that delegation began.
 7. **End chat** immediately silences local input/output, sends `session.close`, and waits for `session.closed` before releasing WebRTC resources. Final voice usage appears in the debug panel. Restart waits for shutdown before opening a fresh session.
 
-Our server handles connection setup and, with `DEBUG_MODE=true`, observes the session over a GPT-Live sideband. The browser remains responsible for instrument tools. There is no database, purchase, or persistent confirmed-choice record.
+Our server handles connection setup and attaches a GPT-Live sideband for periodic time announcements. With `DEBUG_MODE=true`, it also logs the session. The browser remains responsible for instrument tools. There is no database, purchase, or persistent confirmed-choice record.
 
 See the official [GPT-Live WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live), [delegation guide](https://developers.openai.com/api/docs/guides/live-delegation), and [session lifecycle guide](https://developers.openai.com/api/docs/guides/live-conversations).
+
+### Time announcements
+
+Every active session receives a server-side time nudge every 30 seconds, starting 30 seconds after `session.started`. The server sends `session.commentary.append` with `delegation_id: null`, a unique `time-nudge-…` event ID, and the current time in **Europe/Berlin** (including seconds, with automatic daylight-saving adjustment). GPT-Live is asked to briefly announce it in the conversation's language. The model controls when the speech actually happens; 30 seconds is the send interval, not an exact playback schedule.
+
+This runs independently of `DEBUG_MODE`. Reconnects reuse the session's single timer; disconnected ticks are skipped rather than queued with stale times. Closing the session or sideband stops the timer. If attachment fails, voice chat still works but time nudges are unavailable. With debug logging enabled, outgoing nudges have `direction: "sent"`; match their `event_id` to `session.commentary.appended.client_event_id` to check acceptance. An acknowledgement confirms injection into the model, not audible playback. See the [official GPT-Live update guide](https://developers.openai.com/api/docs/guides/live-delegation#send-the-right-kind-of-update).
 
 ### Debugging
 
 Set `DEBUG_MODE=true` in `.env` and restart the server (`docker compose up -d --force-recreate` for Docker). This is read at runtime; no rebuild is required to change the flag. Setup, errors, sideband initialization/reconnect/close, transcripts, delegation, tools, usage, and every raw sideband event are written as JSON lines to stdout with timestamps and request/session IDs. Reflected audio payloads are included when OpenAI sends them. Credential fields are redacted; conversation content is intentionally logged. Use `docker compose logs -f app` to watch.
 
-The server attaches through the SDK to `/v1/live/sessions/{session_id}/attach` before returning the browser's SDP answer. It only observes; it never executes a tool or sends session commands. Attachment failure is logged and reported to the client without preventing the voice chat. Interrupted observers retry up to three times; events missed during an outage cannot be recovered. Observers close on `session.closed`, final socket closure, or a two-hour safety limit. This background connection requires a long-running Node process, as used by this project's Docker deployment; request-scoped serverless hosting would need a separate persistent worker. See the [official sideband guide](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live).
+The server attaches through the SDK to `/v1/live/sessions/{session_id}/attach` before returning the browser's SDP answer. It sends time nudges but leaves tool execution to the browser. Attachment failure is logged and reported to the client without preventing the voice chat. Interrupted sidebands retry up to three times; events missed during an outage cannot be recovered. Sidebands and their timers close on `session.closed`, final socket closure, or a two-hour safety limit. This background connection requires a long-running Node process, as used by this project's Docker deployment; request-scoped serverless hosting would need a separate persistent worker. See the [official sideband guide](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live).
 
 Click **Debug** in the bottom-left corner to open the floating client monitor. It is available independently of the server flag and captures before opening, while hidden, and across reconnects. Inspect full incoming and outgoing WebRTC JSON, unknown events, HTTP setup, errors, ICE/signaling/data-channel changes, track metadata, and WebRTC statistics sampled once per second. Categories, direction filters, payload search, freeze-view, clear, and JSON export are available. The sideband indicator reports its attachment status at setup, not its current health.
 

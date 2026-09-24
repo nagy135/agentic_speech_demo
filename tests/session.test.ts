@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { WebSocketServer } from "ws";
 import { POST } from "../app/api/session/route";
 import { createSessionConfig } from "../lib/session";
 
@@ -27,6 +29,23 @@ test("session has exactly the requested tools, audio, and language/confirmation 
   );
 });
 test("session route validates configuration, input, and proxies SDP without exposing credentials", async (t) => {
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(typeof address === "object" && address);
+  const previousBaseURL = process.env.OPENAI_BASE_URL;
+  process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+  const sockets: Promise<unknown>[] = [];
+  server.on("connection", (socket) => sockets.push(once(socket, "close")));
+  t.after(async () => {
+    for (const socket of server.clients) {
+      socket.send(JSON.stringify({ type: "session.closed" }));
+    }
+    await Promise.all(sockets);
+    server.close();
+    if (previousBaseURL === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = previousBaseURL;
+  });
   const previousKey = process.env.OPENAI_API_KEY;
   const previousDebug = process.env.DEBUG_MODE;
   process.env.DEBUG_MODE = "false";
@@ -57,7 +76,7 @@ test("session route validates configuration, input, and proxies SDP without expo
     400,
   );
   global.fetch = async (input, init) => {
-    assert.equal(input, "https://api.openai.com/v1/live/sessions");
+    assert.equal(input, `${process.env.OPENAI_BASE_URL}/live/sessions`);
     assert.equal(
       new Headers(init?.headers).get("authorization"),
       "Bearer test-server-only-key",
@@ -89,7 +108,7 @@ test("session route validates configuration, input, and proxies SDP without expo
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   const body = await response.json();
-  assert.equal(body.debug.sideband, "disabled");
+  assert.equal(body.debug.sideband, "connected");
   assert.match(body.debug.requestId, /^[a-f0-9-]{36}$/);
   assert.deepEqual(body, {
     debug: body.debug,

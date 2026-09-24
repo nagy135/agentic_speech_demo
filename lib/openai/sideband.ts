@@ -1,14 +1,14 @@
 import type OpenAI from "openai";
 import { SidebandWS } from "openai/resources/live/sideband/ws";
-import { debugEnabled, serverDebug } from "./debug";
+import { serverDebug } from "./debug";
+import { createTimeNudges } from "./time-nudges";
 
-/** Observe only: the browser remains the sole owner of tool execution and commands. */
-export async function attachDebugSideband(
+/** Send clock nudges and observe the session; the browser still executes tools. */
+export async function attachSideband(
   client: OpenAI,
   sessionId: string,
   requestId: string,
-): Promise<"connected" | "failed" | "disabled"> {
-  if (!debugEnabled()) return "disabled";
+): Promise<"connected" | "failed"> {
   const context = { requestId, sessionId, transport: "sideband" };
   serverDebug(context, "sideband.connection.initializing");
   try {
@@ -25,23 +25,30 @@ export async function attachDebugSideband(
         },
       },
     );
-    // A hard bound also releases orphan observers if a peer never completes setup.
+    const nudges = createTimeNudges(sideband, context);
+    // A hard bound also releases orphan connections if a peer never completes setup.
     const lifetime = setTimeout(
       () => {
         serverDebug(context, "sideband.connection.expired", {
           maximumHours: 2,
         });
+        nudges.stop();
         sideband.close();
       },
       2 * 60 * 60 * 1000,
     );
     lifetime.unref();
-    sideband.on("event", (event) => {
-      serverDebug(context, event.type, event);
-      if (event.type === "session.closed") {
+    const handleLifecycle = (type: string) => {
+      if (type === "session.started") nudges.start();
+      if (type === "session.closed") {
+        nudges.stop();
         clearTimeout(lifetime);
         sideband.close();
       }
+    };
+    sideband.on("event", (event) => {
+      serverDebug(context, event.type, event);
+      handleLifecycle(event.type);
     });
     sideband.on("raw", (data) => {
       const raw =
@@ -57,10 +64,7 @@ export async function attachDebugSideband(
           typeof event?.type === "string" ? event.type : "sideband.unknown",
           event,
         );
-        if (event?.type === "session.closed") {
-          clearTimeout(lifetime);
-          sideband.close();
-        }
+        handleLifecycle(event?.type);
       } catch {
         serverDebug(context, "sideband.invalid_message", { raw });
       }
@@ -72,6 +76,7 @@ export async function attachDebugSideband(
       });
     });
     sideband.on("close", (code, reason) => {
+      nudges.stop();
       clearTimeout(lifetime);
       serverDebug(context, "sideband.connection.closed", { code, reason });
     });
@@ -88,6 +93,7 @@ export async function attachDebugSideband(
         sideband.socket.off("error", failed);
         sideband.socket.off("close", failed);
         if (status === "failed") {
+          nudges.stop();
           clearTimeout(lifetime);
           sideband.close();
           serverDebug(context, "sideband.connection.failed");
