@@ -1,3 +1,4 @@
+import { LiveDebug } from "./debug";
 import type { ServerEvent } from "./types";
 import {
   defaultVoiceSettings,
@@ -23,13 +24,21 @@ export class LiveTransport {
   private audioTimer: ReturnType<typeof setTimeout> | null = null;
   private lastAudio: { energy: number; duration: number } | null = null;
   private speaking = false;
+  private observingAudio = false;
+  private lastStatsAt = 0;
+  private lastInputAudio: { energy: number; duration: number } | null = null;
+  private warnedStats = false;
 
   constructor(
     private readonly audio: HTMLAudioElement,
     private readonly callbacks: TransportCallbacks,
+    private readonly debug = new LiveDebug(),
   ) {}
 
   async connect(settings: VoiceSettings = defaultVoiceSettings): Promise<void> {
+    this.debug.record("client", "local", "connection.initializing", {
+      settings,
+    });
     this.timer = setTimeout(
       () =>
         this.fail(
@@ -43,6 +52,7 @@ export class LiveTransport {
           "Microphone access requires localhost or HTTPS and a browser with WebRTC support.",
         );
       }
+      this.debug.record("media", "local", "microphone.requested");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -56,6 +66,14 @@ export class LiveTransport {
         return;
       }
       this.stream = stream;
+      this.debug.record(
+        "media",
+        "local",
+        "microphone.acquired",
+        stream
+          .getAudioTracks()
+          .map((track) => ({ id: track.id, settings: track.getSettings?.() })),
+      );
       const peer = new RTCPeerConnection();
       this.peer = peer;
       stream.getTracks().forEach((track) => {
@@ -65,12 +83,41 @@ export class LiveTransport {
       });
       peer.ontrack = ({ streams, track }) => {
         if (this.closed) return;
+        this.debug.record("webrtc", "received", "audio.track", {
+          id: track.id,
+          kind: track.kind,
+          readyState: track.readyState,
+        });
         this.audio.srcObject = streams[0] || new MediaStream([track]);
         void this.audio.play().catch(() => {
-          if (!this.closed) this.callbacks.onAudioBlocked();
+          if (!this.closed) {
+            this.debug.record("media", "local", "playback.blocked");
+            this.callbacks.onAudioBlocked();
+          }
         });
       };
+      peer.oniceconnectionstatechange = () =>
+        this.debug.record("webrtc", "local", "ice.connection", {
+          state: peer.iceConnectionState,
+        });
+      peer.onicegatheringstatechange = () =>
+        this.debug.record("webrtc", "local", "ice.gathering", {
+          state: peer.iceGatheringState,
+        });
+      peer.onsignalingstatechange = () =>
+        this.debug.record("webrtc", "local", "signaling.state", {
+          state: peer.signalingState,
+        });
+      peer.onicecandidateerror = (event) =>
+        this.debug.record("webrtc", "local", "ice.error", {
+          code: event.errorCode,
+          message: event.errorText,
+          url: event.url,
+        });
       peer.onconnectionstatechange = () => {
+        this.debug.record("webrtc", "local", "connection.state", {
+          state: peer.connectionState,
+        });
         if (
           ["failed", "disconnected", "closed"].includes(peer.connectionState)
         ) {
@@ -81,16 +128,35 @@ export class LiveTransport {
       };
       const channel = peer.createDataChannel("oai-events");
       this.channel = channel;
+      channel.onopen = () =>
+        this.debug.record("webrtc", "local", "channel.open", {
+          label: channel.label,
+        });
       channel.onmessage = (message) => {
         if (this.closed) return;
         try {
           const event = JSON.parse(message.data) as ServerEvent;
+          this.debug.record(
+            "webrtc",
+            "received",
+            typeof event?.type === "string" ? event.type : "unknown",
+            event,
+          );
+          if (!event || typeof event.type !== "string")
+            throw new Error("Missing event type");
           if (event.type === "session.started") {
             this.clearTimer();
-            void this.observeAudio();
+            if (!this.observingAudio) {
+              this.observingAudio = true;
+              void this.observeAudio();
+            }
           }
           this.callbacks.onEvent(event);
-        } catch {
+        } catch (error) {
+          this.debug.record("webrtc", "received", "channel.invalid_message", {
+            raw: message.data,
+            error,
+          });
           this.fail(
             "An unexpected voice event was received. Please reconnect.",
           );
@@ -112,6 +178,10 @@ export class LiveTransport {
         throw new Error(
           "The browser did not create an audio connection offer.",
         );
+      this.debug.record("http", "sent", "http.session.request", {
+        sdp: sdpOffer,
+        settings,
+      });
       const response = await fetch("/api/session", {
         method: "POST",
         headers: {
@@ -123,29 +193,51 @@ export class LiveTransport {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        this.debug.record("http", "received", "http.session.error", {
+          status: response.status,
+          body,
+        });
         throw new Error(
           body.error || "Could not connect to the voice assistant.",
         );
       }
       const result = await response.json();
+      this.debug.record("http", "received", "http.session.response", {
+        status: response.status,
+        body: result,
+      });
       const sdp = result.transport?.sdp;
       if (typeof sdp !== "string")
         throw new Error(
           "The voice service returned an invalid connection answer.",
         );
-      if (!this.closed)
+      if (!this.closed) {
         await peer.setRemoteDescription({ type: "answer", sdp });
+        this.debug.record("webrtc", "local", "sdp.answer.applied");
+      }
     } catch (cause) {
       this.fail(connectionError(cause));
     }
   }
 
   send(event: object): void {
-    if (!this.closed && this.channel?.readyState === "open")
+    const type = (event as { type?: string }).type || "unknown";
+    if (!this.closed && this.channel?.readyState === "open") {
       this.channel.send(JSON.stringify(event));
+      this.debug.record("webrtc", "sent", type, event);
+    } else {
+      this.debug.record("webrtc", "local", "channel.send.failed", {
+        event,
+        state: this.channel?.readyState,
+      });
+    }
   }
 
   setMuted(muted: boolean): void {
+    this.debug.record("media", "local", "microphone.muted", { muted });
+    if (muted) {
+      this.debug.speaking(false, this.speaking);
+    }
     this.stream?.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
     });
@@ -153,11 +245,15 @@ export class LiveTransport {
 
   async resumeAudio(): Promise<void> {
     await this.audio.play();
+    this.debug.record("media", "local", "playback.resumed");
   }
 
   silence(): void {
     this.setMuted(true);
     this.audio.pause();
+    this.speaking = false;
+    this.debug.speaking(false, false);
+    this.callbacks.onSpeaking(false);
   }
 
   private waitForIce(peer: RTCPeerConnection): Promise<void> {
@@ -188,36 +284,64 @@ export class LiveTransport {
     });
   }
 
-  /** GPT-Live has no end-of-spoken-response event; measure received audio instead. */
+  /** Independent input/output levels reflect overlap, silence, mute and playback. */
   private async observeAudio(): Promise<void> {
     if (this.closed || !this.peer) return;
     let speaking = false;
+    let userSpeaking = false;
     try {
       const stats = await this.peer.getStats();
+      const reports: object[] = [];
       stats.forEach((report) => {
-        if (report.type !== "inbound-rtp" || report.kind !== "audio") return;
-        if (
-          typeof report.totalAudioEnergy !== "number" ||
-          typeof report.totalSamplesDuration !== "number"
-        )
-          return;
+        reports.push(report);
+        if (report.kind !== "audio" && report.mediaType !== "audio") return;
+        const input =
+          report.type === "media-source" ||
+          (report.type === "track" && !report.remoteSource);
+        if (!input && report.type !== "inbound-rtp") return;
+        const previous = input ? this.lastInputAudio : this.lastAudio;
         const sample = {
           energy: report.totalAudioEnergy,
           duration: report.totalSamplesDuration,
         };
-        if (this.lastAudio && sample.duration > this.lastAudio.duration) {
-          const level = Math.sqrt(
-            Math.max(0, sample.energy - this.lastAudio.energy) /
-              (sample.duration - this.lastAudio.duration),
+        let level =
+          typeof report.audioLevel === "number" ? report.audioLevel : 0;
+        if (previous && sample.duration > previous.duration) {
+          level = Math.sqrt(
+            Math.max(0, sample.energy - previous.energy) /
+              (sample.duration - previous.duration),
           );
-          speaking = level > 0.008 && !this.audio.paused;
         }
-        this.lastAudio = sample;
+        if (
+          Number.isFinite(sample.energy) &&
+          Number.isFinite(sample.duration)
+        ) {
+          if (input) this.lastInputAudio = sample;
+          else this.lastAudio = sample;
+        }
+        if (input)
+          userSpeaking ||=
+            level > 0.008 &&
+            !!this.stream?.getAudioTracks().some((track) => track.enabled);
+        else
+          speaking ||=
+            level > 0.008 &&
+            !this.audio.paused &&
+            !this.audio.muted &&
+            this.audio.volume !== 0;
       });
-    } catch {
-      /* Audio still works in browsers without usable energy statistics. */
+      if (!this.closed && Date.now() - this.lastStatsAt >= 1000) {
+        this.lastStatsAt = Date.now();
+        this.debug.record("webrtc", "local", "audio.rtc_stats", reports);
+      }
+    } catch (error) {
+      if (!this.warnedStats) {
+        this.warnedStats = true;
+        this.debug.record("webrtc", "local", "audio.stats.error", error);
+      }
     }
     if (this.closed) return;
+    this.debug.speaking(userSpeaking, speaking);
     if (speaking !== this.speaking) {
       this.speaking = speaking;
       this.callbacks.onSpeaking(speaking);
@@ -228,6 +352,8 @@ export class LiveTransport {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.debug.speaking(false, false);
+    this.debug.record("client", "local", "connection.closed");
     if (this.audioTimer) clearTimeout(this.audioTimer);
     this.clearTimer();
     this.abort.abort();
@@ -240,6 +366,10 @@ export class LiveTransport {
       this.channel = null;
     }
     if (this.peer) {
+      this.peer.oniceconnectionstatechange = null;
+      this.peer.onicegatheringstatechange = null;
+      this.peer.onsignalingstatechange = null;
+      this.peer.onicecandidateerror = null;
       this.peer.onconnectionstatechange = null;
       this.peer.ontrack = null;
       this.peer.close();
@@ -261,6 +391,7 @@ export class LiveTransport {
 
   private fail(message: string): void {
     if (this.closed) return;
+    this.debug.record("client", "local", "connection.error", { message });
     this.close();
     this.callbacks.onError(message);
   }

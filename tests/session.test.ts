@@ -28,9 +28,13 @@ test("session has exactly the requested tools, audio, and language/confirmation 
 });
 test("session route validates configuration, input, and proxies SDP without exposing credentials", async (t) => {
   const previousKey = process.env.OPENAI_API_KEY;
+  const previousDebug = process.env.DEBUG_MODE;
+  process.env.DEBUG_MODE = "false";
   const originalFetch = global.fetch;
   t.after(() => {
     global.fetch = originalFetch;
+    if (previousDebug === undefined) delete process.env.DEBUG_MODE;
+    else process.env.DEBUG_MODE = previousDebug;
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousKey;
   });
@@ -84,7 +88,11 @@ test("session route validates configuration, input, and proxies SDP without expo
   const response = await POST(request());
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
-  assert.deepEqual(await response.json(), {
+  const body = await response.json();
+  assert.equal(body.debug.sideband, "disabled");
+  assert.match(body.debug.requestId, /^[a-f0-9-]{36}$/);
+  assert.deepEqual(body, {
+    debug: body.debug,
     session: { id: "live_test" },
     transport: { type: "webrtc", sdp: "v=0\r\nmock-answer" },
   });

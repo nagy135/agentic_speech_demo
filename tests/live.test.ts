@@ -10,6 +10,7 @@ function browserFixture(
   delayedMicrophone = false,
   autoStart = true,
 ) {
+  const stats = new Map<string, Record<string, unknown>>();
   const sent: Array<{
     type: string;
     event_id?: string;
@@ -72,7 +73,7 @@ function browserFixture(
         emit({ type: "session.started", session: { id: "live_test" } });
     }
     async getStats() {
-      return new Map();
+      return stats;
     }
     close() {
       this.connectionState = "closed";
@@ -165,6 +166,8 @@ function browserFixture(
       },
     });
   return {
+    stats,
+    channel,
     client,
     audio,
     track,
@@ -429,4 +432,63 @@ test("timestamped captions preserve overlap, late fragments, spacing and repeate
     part("session.input_transcript.delta", " please", 900, 1000, "late"),
   );
   assert.equal(captions.latestUser().text, "Yes, yes.");
+});
+
+test("debug records setup, all incoming events, outgoing commands, and malformed messages", async (t) => {
+  const { client, audio, channel, emit } = browserFixture(t);
+  await client.start(audio);
+  emit({ type: "unknown.future.event", delta: "raw payload" });
+  const events = client.debug.getSnapshot().entries;
+  assert.ok(events.some((event) => event.type === "http.session.response"));
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "session.started" && event.direction === "received",
+    ),
+  );
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "session.instructions.append" &&
+        event.direction === "sent",
+    ),
+  );
+  assert.deepEqual(
+    events.find((event) => event.type === "unknown.future.event")?.payload,
+    { type: "unknown.future.event", delta: "raw payload" },
+  );
+  channel.onmessage?.({ data: "not-json" });
+  assert.ok(
+    client.debug
+      .getSnapshot()
+      .entries.some((event) => event.type === "channel.invalid_message"),
+  );
+  assert.equal(client.getSnapshot().status, "idle");
+  assert.equal(client.debug.getSnapshot().botSpeaking, false);
+});
+
+test("independent user and bot lights follow levels, mute, silence, and shutdown", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { client, audio, stats, emit } = browserFixture(t);
+  stats.set("input", { type: "media-source", kind: "audio", audioLevel: 0.08 });
+  stats.set("output", { type: "inbound-rtp", kind: "audio", audioLevel: 0.08 });
+  await client.start(audio);
+  assert.equal(client.debug.getSnapshot().userSpeaking, true);
+  assert.equal(client.debug.getSnapshot().botSpeaking, true);
+  client.toggleMute();
+  assert.equal(client.debug.getSnapshot().userSpeaking, false);
+  assert.equal(client.debug.getSnapshot().botSpeaking, true);
+  stats.set("output", { type: "inbound-rtp", kind: "audio", audioLevel: 0 });
+  t.mock.timers.tick(150);
+  await Promise.resolve();
+  assert.equal(client.debug.getSnapshot().botSpeaking, false);
+  client.toggleMute();
+  t.mock.timers.tick(150);
+  await Promise.resolve();
+  assert.equal(client.debug.getSnapshot().userSpeaking, true);
+  const stopping = client.stop();
+  assert.equal(client.debug.getSnapshot().userSpeaking, false);
+  assert.equal(client.debug.getSnapshot().botSpeaking, false);
+  emit({ type: "session.closed" });
+  await stopping;
 });

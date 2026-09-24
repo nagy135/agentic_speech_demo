@@ -1,4 +1,5 @@
 import { emptyChoiceState, executeTool, normalizeTranscript } from "../tools";
+import { LiveDebug } from "./debug";
 import { LiveTransport } from "./transport";
 import { LiveTranscripts } from "./transcripts";
 import { greetingCue, greetingInstructions } from "./greeting";
@@ -39,6 +40,7 @@ function initialSnapshot(): LiveSnapshot {
 }
 
 export class LiveClient {
+  readonly debug = new LiveDebug();
   private snapshot = initialSnapshot();
   private readonly listeners = new Set<() => void>();
   private transport: LiveTransport | null = null;
@@ -101,23 +103,27 @@ export class LiveClient {
       status: "connecting",
       activeSettings: { ...settings },
     });
-    const transport = new LiveTransport(audio, {
-      onEvent: (event) => {
-        if (transport === this.transport) this.handleEvent(event);
+    const transport = new LiveTransport(
+      audio,
+      {
+        onEvent: (event) => {
+          if (transport === this.transport) this.handleEvent(event);
+        },
+        onError: (error) => {
+          if (transport === this.transport) this.finishSession(error);
+        },
+        onAudioBlocked: () => {
+          if (transport === this.transport) this.update({ audioBlocked: true });
+        },
+        onSpeaking: (speaking) => {
+          if (transport === this.transport) {
+            this.speaking = speaking;
+            this.update({});
+          }
+        },
       },
-      onError: (error) => {
-        if (transport === this.transport) this.finishSession(error);
-      },
-      onAudioBlocked: () => {
-        if (transport === this.transport) this.update({ audioBlocked: true });
-      },
-      onSpeaking: (speaking) => {
-        if (transport === this.transport) {
-          this.speaking = speaking;
-          this.update({});
-        }
-      },
-    });
+      this.debug,
+    );
     this.transport = transport;
     await transport.connect(settings);
   }

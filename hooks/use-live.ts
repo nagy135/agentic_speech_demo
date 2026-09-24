@@ -25,6 +25,7 @@ export function useLive(audioRef: RefObject<HTMLAudioElement | null>) {
   }, [audioRef, client, settings]);
   return {
     ...snapshot,
+    debug: client.debug,
     settings,
     setSettings,
     applySettings: () => client.applySettings(settings),

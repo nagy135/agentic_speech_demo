@@ -9,6 +9,7 @@ import { ConversationPanel } from "./conversation/conversation-panel";
 import { ConversationTranscript } from "./conversation/conversation-transcript";
 import { DiscoveryResults } from "./catalogue/discovery-results";
 import { InstrumentCollection } from "./catalogue/instrument-collection";
+import { DebugPanel } from "./conversation/debug-panel";
 import { VoiceSettings } from "./conversation/voice-settings";
 
 export function InstrumentFinder() {
@@ -42,6 +43,7 @@ export function InstrumentFinder() {
       </main>
       <SiteFooter />
       <VoiceSettings voice={voice} />
+      <DebugPanel voice={voice} />
     </div>
   );
 }

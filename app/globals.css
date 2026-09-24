@@ -1383,3 +1383,180 @@ button:disabled:hover {
     scroll-behavior: auto !important;
   }
 }
+
+/* The event monitor stays independent of the conversation layout. */
+.debug-widget {
+  position: fixed;
+  z-index: 70;
+  bottom: 18px;
+  left: 18px;
+  color: #e5eee8;
+  font-size: 12px;
+}
+.debug-widget button,
+.debug-widget input,
+.debug-widget select {
+  font: inherit;
+  color: inherit;
+  background: #24352d;
+  border: 1px solid #4a5d51;
+  border-radius: 7px;
+  padding: 7px 10px;
+}
+.debug-widget button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.debug-widget button:hover {
+  background: #344b3e;
+  transform: none;
+}
+.debug-widget :is(input, select):focus-visible {
+  outline: 2px solid #c9a55b;
+  outline-offset: 2px;
+}
+.debug-widget .debug-toggle {
+  padding: 11px 16px;
+  border-radius: 24px;
+  box-shadow: 0 4px 18px #0003;
+}
+.debug-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(640px, calc(100vw - 36px));
+  height: min(690px, calc(100dvh - 94px));
+  margin-bottom: 10px;
+  padding: 16px;
+  background: #16251e;
+  border: 1px solid #4a5d51;
+  border-radius: 14px;
+  box-shadow: 0 12px 50px #0005;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.debug-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.debug-panel h2 {
+  font: 650 17px var(--sans);
+  margin: 0 0 3px;
+}
+.debug-panel header p,
+.debug-status,
+.debug-note {
+  color: #b6c9bc;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.debug-speaking {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 9px 0;
+}
+.debug-speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.debug-light {
+  width: 10px;
+  height: 10px;
+  background: #53675b;
+  border-radius: 50%;
+}
+.debug-speaker[data-active="true"] .debug-light {
+  background: #85f5a9;
+  box-shadow: 0 0 12px #85f5a9aa;
+}
+.debug-speaker[data-active="true"] {
+  color: #a8ffc5;
+}
+.debug-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.debug-categories button {
+  font-size: 11px;
+  text-transform: capitalize;
+}
+.debug-categories button[aria-pressed="true"] {
+  background: #416049;
+  border-color: #9eca9e;
+}
+.debug-categories b {
+  color: #bac9be;
+  font-variant-numeric: tabular-nums;
+}
+.debug-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.debug-toolbar input {
+  min-width: 140px;
+  flex: 1;
+}
+.debug-toolbar input::placeholder {
+  color: #adbeb2;
+}
+.debug-note {
+  font-size: 11px;
+}
+.debug-events {
+  min-height: 120px;
+  flex: 1;
+  overflow: auto;
+  border-top: 1px solid #3a5041;
+  overscroll-behavior: contain;
+}
+.debug-empty {
+  padding: 24px 8px;
+  color: #b6c9bc;
+}
+.debug-event {
+  border-bottom: 1px solid #334a3b;
+}
+.debug-event summary {
+  cursor: pointer;
+  padding: 10px 4px;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+.debug-event summary > span {
+  display: block;
+}
+.debug-event-meta {
+  color: #b6c9bc;
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+.debug-event pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  background: #0d1912;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+@media (max-width: 520px) {
+  .debug-widget {
+    left: 10px;
+    bottom: 12px;
+  }
+  .debug-panel {
+    width: calc(100vw - 20px);
+    padding: 12px;
+  }
+  .debug-widget .debug-toggle {
+    padding: 10px 12px;
+  }
+}

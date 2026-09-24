@@ -28,26 +28,39 @@ Use `docker compose logs -f app` for logs. A reverse proxy should preserve `Host
 
 ## Configuration
 
-| Variable         | Required | Purpose                                                             |
-| ---------------- | -------- | ------------------------------------------------------------------- |
-| `OPENAI_API_KEY` | Yes      | Server-only project key with GPT-Live and Responses backend access. |
-| `APP_PORT`       | No       | Docker host port; defaults to `3000`.                               |
+| Variable         | Required | Purpose                                                                         |
+| ---------------- | -------- | ------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY` | Yes      | Server-only project key with GPT-Live and Responses backend access.             |
+| `DEBUG_MODE`     | No       | Set `true` to attach a server sideband and log setup plus every received event. |
+| `APP_PORT`       | No       | Docker host port; defaults to `3000`.                                           |
 
 The voice model is `gpt-live-1`. Old `OPENAI_REALTIME_MODEL` and `OPENAI_REALTIME_VOICE` variables are no longer used. The website controls the voice, Responses backend model, backend output budget, and confirmation transcript wait. There are no `NEXT_PUBLIC_` credentials or separate transcription service. Voice duration and backend model usage are billed separately by OpenAI.
 
 ## How the conversation works
 
 1. The browser creates a WebRTC offer, gathers ICE candidates, and sends the SDP and validated UI settings to `POST /api/session`.
-2. Our server uses the OpenAI TypeScript SDK (`client.live.create`) to call `POST /v1/live/sessions` with `model: "gpt-live-1"`, conversation instructions, a voice, and Responses delegation. It returns only the session ID and SDP answer.
+2. Our server uses the OpenAI TypeScript SDK (`client.live.create`) to call `POST /v1/live/sessions` with `model: "gpt-live-1"`, conversation instructions, a voice, and Responses delegation. It returns the session ID, SDP answer, and debug attachment status.
 3. Audio streams directly between the browser and OpenAI, including silence before the user speaks. After `session.started`, the browser sends greeting instructions, waits for their matching `session.instructions.appended` acknowledgement, then sends a single `session.commentary.append` cue to begin speaking. The cue is skipped if either speaker has already started, the instruction was rejected, or the session is closing.
 4. GPT-Live decides when to speak and when a request needs backend work. OpenAI passes the relevant conversation context to **GPT-5.6 Terra** (or the selected **GPT-5.6 Luna**), configured with the catalogue, business rules, and function tools.
 5. Completed function calls arrive as nested `response.output_item.done` events inside `response.event`. The browser collects them by response/delegation, executes the validated handlers after backend completion, sends `response.item.create` results, then `response.create` to continue the backend. Completion snapshots may have empty output; they are not the source of tool arguments.
 6. GPT-Live communicates the backend's result while continuing to listen. Interruptions do not inherently cancel delegated work; the app rejects stale tool actions if newer user speech arrived after that delegation began.
 7. **End chat** immediately silences local input/output, sends `session.close`, and waits for `session.closed` before releasing WebRTC resources. Final voice usage appears in the debug panel. Restart waits for shutdown before opening a fresh session.
 
-Our server handles connection setup; it does not relay ongoing audio or execute the instrument tools. There is no database, purchase, or persistent confirmed-choice record.
+Our server handles connection setup and, with `DEBUG_MODE=true`, observes the session over a GPT-Live sideband. The browser remains responsible for instrument tools. There is no database, purchase, or persistent confirmed-choice record.
 
 See the official [GPT-Live WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live), [delegation guide](https://developers.openai.com/api/docs/guides/live-delegation), and [session lifecycle guide](https://developers.openai.com/api/docs/guides/live-conversations).
+
+### Debugging
+
+Set `DEBUG_MODE=true` in `.env` and restart the server (`docker compose up -d --force-recreate` for Docker). This is read at runtime; no rebuild is required to change the flag. Setup, errors, sideband initialization/reconnect/close, transcripts, delegation, tools, usage, and every raw sideband event are written as JSON lines to stdout with timestamps and request/session IDs. Reflected audio payloads are included when OpenAI sends them. Credential fields are redacted; conversation content is intentionally logged. Use `docker compose logs -f app` to watch.
+
+The server attaches through the SDK to `/v1/live/sessions/{session_id}/attach` before returning the browser's SDP answer. It only observes; it never executes a tool or sends session commands. Attachment failure is logged and reported to the client without preventing the voice chat. Interrupted observers retry up to three times; events missed during an outage cannot be recovered. Observers close on `session.closed`, final socket closure, or a two-hour safety limit. This background connection requires a long-running Node process, as used by this project's Docker deployment; request-scoped serverless hosting would need a separate persistent worker. See the [official sideband guide](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live).
+
+Click **Debug** in the bottom-left corner to open the floating client monitor. It is available independently of the server flag and captures before opening, while hidden, and across reconnects. Inspect full incoming and outgoing WebRTC JSON, unknown events, HTTP setup, errors, ICE/signaling/data-channel changes, track metadata, and WebRTC statistics sampled once per second. Categories, direction filters, payload search, freeze-view, clear, and JSON export are available. The sideband indicator reports its attachment status at setup, not its current health.
+
+Two independent lights show measured microphone and received playback activity, including simultaneous speech. Muting, ending the chat, or closing the connection resets the relevant lights. These are audio-level indicators, not semantic voice detection; background noise may trigger them and browsers without audio-level statistics may leave them dark. WebRTC audio arrives on media tracks, so the panel shows metadata/statistics rather than raw audio samples. Server and browser streams can differ, especially reflected audio and playback timing.
+
+Client history is kept in memory, capped at 1,500 events or approximately 8 MB (the latest event is always retained intact). The panel reports discarded entries; category totals count events since the last clear. Export retained events before reloading if needed. Server output is managed by the process/Docker log driver rather than this client limit.
 
 ### Voice settings
 

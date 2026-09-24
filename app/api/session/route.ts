@@ -1,4 +1,7 @@
 import OpenAI from "openai";
+import { randomUUID } from "node:crypto";
+import { serverDebug } from "@/lib/openai/debug";
+import { attachDebugSideband } from "@/lib/openai/sideband";
 import { createSessionConfig } from "@/lib/session";
 import { isSameOrigin } from "@/lib/http/is-same-origin";
 import { readSessionError } from "@/lib/openai/session-error";
@@ -9,6 +12,20 @@ export const maxDuration = 40;
 const headers = { "Cache-Control": "no-store" };
 
 export async function POST(request: Request) {
+  const requestId = randomUUID();
+  const started = Date.now();
+  serverDebug({ requestId }, "http.session.received", {
+    method: request.method,
+  });
+  const response = await createSession(request, requestId);
+  serverDebug({ requestId }, "http.session.completed", {
+    status: response.status,
+    durationMs: Date.now() - started,
+  });
+  return response;
+}
+
+async function createSession(request: Request, requestId: string) {
   if (!isSameOrigin(request)) {
     return Response.json(
       { error: "This endpoint only accepts requests from this app." },
@@ -76,9 +93,14 @@ export async function POST(request: Request) {
       apiKey: process.env.OPENAI_API_KEY,
       maxRetries: 0,
     });
+    const session = createSessionConfig(settings);
+    serverDebug({ requestId }, "connection.initializing", {
+      session,
+      transport: { type: "webrtc", sdp },
+    });
     const result = await client.live.create(
       {
-        session: createSessionConfig(settings),
+        session,
         transport: { type: "webrtc", sdp },
       },
       {
@@ -90,14 +112,37 @@ export async function POST(request: Request) {
       typeof result.transport?.sdp !== "string"
     )
       throw new Error("Invalid session response");
+    serverDebug(
+      { requestId, sessionId: result.session.id },
+      "connection.initialized",
+      result,
+    );
+    const sideband = await attachDebugSideband(
+      client,
+      result.session.id,
+      requestId,
+    );
     return Response.json(
       {
+        debug: { sideband, requestId },
         session: { id: result.session.id },
         transport: { type: "webrtc", sdp: result.transport.sdp },
       },
       { headers },
     );
   } catch (cause) {
+    serverDebug(
+      { requestId },
+      "connection.error",
+      cause instanceof OpenAI.APIError
+        ? {
+            message: cause.message,
+            status: cause.status,
+            error: cause.error,
+            requestId: cause.requestID,
+          }
+        : cause,
+    );
     if (cause instanceof OpenAI.APIError && cause.status !== undefined) {
       const failure = readSessionError(cause);
       console.error("GPT-Live session rejected", {
